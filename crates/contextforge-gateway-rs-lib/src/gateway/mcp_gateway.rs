@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-
 use std::{collections::HashSet, sync::Arc};
 
 use super::mcp_call_validator::AuthorizedCallValidator;
+
 use http::request::Parts;
 use itertools::Itertools;
 use rmcp::RoleClient;
@@ -25,6 +25,7 @@ use rmcp::{
 
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
+use typed_builder::TypedBuilder;
 
 use crate::gateway::mcp_call_validator::InitializeCallValidator;
 use crate::gateway::session_manager::SessionManager;
@@ -33,31 +34,20 @@ pub use crate::gateway::session_store::LocalUserSessionStore;
 use crate::gateway::session_store::{UserSession, UserSessionStore};
 use crate::{SessionId, user_config_store::UserConfig};
 
-#[derive(Clone)]
+#[derive(Clone, TypedBuilder)]
+#[builder(field_defaults(setter(prefix = "with_")))]
 pub struct McpService<T>
 where
     T: UserSessionStore,
 {
+    #[builder(default = Arc::new(Mutex::new(HashSet::new())))]
     subscriptions: Arc<Mutex<HashSet<String>>>,
+    #[builder(default = Arc::new(Mutex::new(HashMap::new())))]
     transports: Arc<Mutex<HashMap<BackendTransportKey, BackendTransportService>>>,
+    #[builder(default = Arc::new(Mutex::new(LoggingLevel::Debug)))]
     log_level: Arc<Mutex<LoggingLevel>>,
     http_client: reqwest::Client,
     user_session_store: T,
-}
-
-impl<T> McpService<T>
-where
-    T: UserSessionStore,
-{
-    pub fn with_stores(user_session_store: T) -> Self {
-        Self {
-            subscriptions: Arc::new(Mutex::new(HashSet::new())),
-            transports: Arc::new(Mutex::new(HashMap::new())),
-            log_level: Arc::new(Mutex::new(LoggingLevel::Debug)),
-            http_client: reqwest::Client::new(),
-            user_session_store,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

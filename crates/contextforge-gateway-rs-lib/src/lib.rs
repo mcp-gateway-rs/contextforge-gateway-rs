@@ -49,10 +49,17 @@ pub async fn run_gateway(
 
     let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
 
+    let reqwest_backend_client = reqwest::Client::default();
+
     // Create streamable HTTP service
     let mcp_service: StreamableHttpService<McpService<LocalUserSessionStore>, LocalSessionManager> =
         StreamableHttpService::new(
-            move || Ok(McpService::with_stores(user_session_store.clone())),
+            move || {
+                Ok(McpService::builder()
+                    .with_user_session_store(user_session_store.clone())
+                    .with_http_client(reqwest_backend_client.clone())
+                    .build())
+            },
             local_session_manager,
             streamable_config,
         );
