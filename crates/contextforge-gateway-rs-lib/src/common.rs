@@ -1,16 +1,18 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{fs, path::PathBuf, sync::Arc};
 
 use axum_jwt_auth::JwtDecoder;
-use clap::Parser;
+use chrono::{Duration, Utc};
+use clap::{Parser, ValueEnum};
 use http::uri::Authority;
 use openid::{CompactJson, CustomClaims, StandardClaims};
 use redis::{ConnectionAddr, IntoConnectionInfo};
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use std::net::SocketAddr;
 use thiserror::Error;
 
-use crate::user_config_store::UserConfigStore;
+use crate::{const_values::CONEXT_FORGE_GATEWAY_AUDIENCE, user_config_store::UserConfigStore};
 
 #[derive(Clone)]
 pub struct ContextForgeGatewayAppState {
@@ -48,7 +50,15 @@ impl IntoConnectionInfo for RedisConfig {
     }
 }
 
-#[derive(Debug, Clone, Parser)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum UpstreamConnectionMode {
+    PlainTextAndTls,
+    PlainTextAndMTls,
+    TlsOnly,
+    MtlsOnly,
+}
+
+#[derive(Debug, Clone, Parser, Default)]
 #[command(name = "contextforge-gateway-rs")]
 #[command(about = "Minimal, fast and experimental Gateway/Dataplane for ContextForge")]
 pub struct Config {
@@ -83,6 +93,15 @@ pub struct Config {
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TLS_SERVER_CERTIFICATE")]
     pub server_certificate: Option<PathBuf>,
+
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_UPSTREAM_CONNECTION_MODE")]
+    pub upstream_connection_mode: Option<UpstreamConnectionMode>,
+
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TLS_UPSTREAM_PRIVATE_KEY")]
+    pub upstream_private_key: Option<PathBuf>,
+
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TLS_UPSTREAM__CERTIFICATE")]
+    pub upstream_certificate: Option<PathBuf>,
 }
 
 #[derive(Error, Debug)]
@@ -100,4 +119,60 @@ impl TryFrom<&Config> for RedisConfig {
     }
 
     type Error = ConfigValidationError;
+}
+
+impl TryFrom<&Config> for reqwest::Client {
+    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+    fn try_from(config: &Config) -> Result<Self, Self::Error> {
+        let builder = reqwest::Client::builder();
+        let builder = match config.upstream_connection_mode.as_ref() {
+            None | Some(UpstreamConnectionMode::TlsOnly) => builder.https_only(true),
+            Some(UpstreamConnectionMode::PlainTextAndTls) => builder.https_only(false),
+            Some(UpstreamConnectionMode::PlainTextAndMTls) => {
+                builder.https_only(false).identity(extract_identity(config)?)
+            },
+            Some(UpstreamConnectionMode::MtlsOnly) => builder.https_only(true).identity(extract_identity(config)?),
+        };
+        Ok(builder.build()?)
+    }
+}
+
+fn extract_identity(config: &Config) -> Result<reqwest::Identity, Box<dyn std::error::Error + Send + Sync + 'static>> {
+    match (config.upstream_private_key.as_ref(), config.upstream_certificate.as_ref()) {
+        (Some(private_key), Some(certificate)) => {
+            let cert = fs::read(certificate)?;
+            let key = fs::read(private_key)?;
+            Ok(reqwest::Identity::from_pkcs8_pem(&cert, &key)?)
+        },
+
+        _ => Err("Invalid/missing configuration".into()),
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct DefaultClaims {
+    iss: Url,
+    sub: String,
+    aud: String,
+    exp: i64,
+    iat: Option<i64>,
+    userinfo: openid::Userinfo,
+}
+
+impl DefaultClaims {
+    pub fn new(user_id: String) -> Self {
+        let url = "http://contextforge-gateway-rs".parse().expect("Expecting this to work");
+        let audience = CONEXT_FORGE_GATEWAY_AUDIENCE.to_owned();
+        let user_info = openid::Userinfo { sub: user_id.clone(), ..Default::default() };
+        Self {
+            iss: url,
+            sub: user_id,
+            aud: audience,
+            exp: (Utc::now() + Duration::hours(1)).timestamp(),
+            iat: Some(Utc::now().timestamp()),
+
+            userinfo: user_info,
+        }
+    }
 }

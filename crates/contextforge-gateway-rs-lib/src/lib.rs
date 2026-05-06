@@ -1,4 +1,4 @@
-use std::{fs, sync::Arc};
+use std::{env, fs, sync::Arc};
 
 use axum::middleware;
 use axum_jwt_auth::LocalDecoder;
@@ -15,6 +15,9 @@ mod gateway;
 mod layers;
 mod transports;
 
+#[cfg(test)]
+mod tests;
+
 #[cfg(feature = "with_tools")]
 mod tools;
 
@@ -25,85 +28,107 @@ use layers::session_id::SessionId;
 use tower_http::cors::{Any, CorsLayer};
 
 use transports::{DownstreamTls, Tcp};
+use typed_builder::TypedBuilder;
 
 use crate::{
-    common::{ContextForgeGatewayAppState, RedisClient, RedisConfig},
+    common::ContextForgeGatewayAppState,
     const_values::CONEXT_FORGE_GATEWAY_AUDIENCE,
     gateway::LocalUserSessionStore,
     layers::{
         claims_id::claims_layer, session_id::SessionIdLayer, user_config_store::user_config_store_layer,
         virtual_host_id::virtual_host_id_layer,
     },
-    user_config_store::RedisUserConfigStore,
+    user_config_store::UserConfigStore,
 };
 
 pub use crate::common::Config;
+pub use common::{RedisClient, RedisConfig};
+pub use user_config_store::RedisUserConfigStore;
 
-pub async fn run_gateway(
+#[derive(Clone, TypedBuilder)]
+#[builder(field_defaults(setter(prefix = "with_")))]
+pub struct Gateway {
     config: Config,
-    local_session_manager: Arc<LocalSessionManager>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let redis_config = RedisConfig::try_from(&config)?;
-    let redis_client = RedisClient::open(redis_config)?;
-    let user_session_store = LocalUserSessionStore::new();
+    session_manager: Arc<LocalSessionManager>,
+    user_config_store: Arc<dyn UserConfigStore + std::marker::Send + Sync>,
+}
 
-    let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
+impl Gateway {
+    pub async fn run_gateway(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let path = env::current_dir()?;
+        println!("Current path {path:?}");
+        let config = &self.config;
+        let session_manager = self.session_manager;
+        let user_config_store = self.user_config_store;
 
-    let reqwest_backend_client = reqwest::Client::default();
+        let user_session_store = LocalUserSessionStore::new();
 
-    // Create streamable HTTP service
-    let mcp_service: StreamableHttpService<McpService<LocalUserSessionStore>, LocalSessionManager> =
-        StreamableHttpService::new(
-            move || {
-                Ok(McpService::builder()
-                    .with_user_session_store(user_session_store.clone())
-                    .with_http_client(reqwest_backend_client.clone())
-                    .build())
-            },
-            local_session_manager,
-            streamable_config,
-        );
+        let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
 
-    let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any).expose_headers(Any);
+        let reqwest_backend_client = reqwest::Client::builder().build()?;
 
-    let mut validation = Validation::new(Algorithm::RS256);
-    validation.set_audience(&[CONEXT_FORGE_GATEWAY_AUDIENCE]);
+        // Create streamable HTTP service
+        let mcp_service: StreamableHttpService<McpService<LocalUserSessionStore>, LocalSessionManager> =
+            StreamableHttpService::new(
+                move || {
+                    Ok(McpService::builder()
+                        .with_user_session_store(user_session_store.clone())
+                        .with_http_client(reqwest_backend_client.clone())
+                        .build())
+                },
+                session_manager,
+                streamable_config,
+            );
 
-    let local_docoder = LocalDecoder::builder()
-        .keys(vec![DecodingKey::from_rsa_pem(&fs::read(&config.token_verification_public_key)?)?])
-        .validation(validation)
-        .build()?;
-    let mcp_add_state = ContextForgeGatewayAppState {
-        jwt_token_decoder: Arc::new(local_docoder),
-        config_store: Arc::new(RedisUserConfigStore::new(redis_client)),
-        config: config.clone(),
-    };
+        let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any).expose_headers(Any);
 
-    let app = axum::Router::new()
-        .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
-        .layer(middleware::from_fn_with_state(mcp_add_state.clone(), user_config_store_layer))
-        .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
-        .layer(SessionIdLayer)
-        .layer(middleware::from_fn(virtual_host_id_layer))
-        .layer(cors_layer);
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_audience(&[CONEXT_FORGE_GATEWAY_AUDIENCE]);
 
-    #[cfg(feature = "with_tools")]
-    let app = tools::add_tools(app);
+        let local_docoder = LocalDecoder::builder()
+            .keys(vec![
+                DecodingKey::from_rsa_pem(&fs::read(&config.token_verification_public_key).map_err(|e| {
+                    format!("Error when creating local decoder {e:?} {:?}", config.token_verification_public_key)
+                })?)
+                .map_err(|e| {
+                    format!("Error when creating local decoder {e:?} {:?}", config.token_verification_public_key)
+                })?,
+            ])
+            .validation(validation)
+            .build()
+            .map_err(|e| format!("Error when creating local decoder {e:?}"))?;
+        let mcp_add_state: ContextForgeGatewayAppState = ContextForgeGatewayAppState {
+            jwt_token_decoder: Arc::new(local_docoder),
+            config_store: Arc::clone(&user_config_store),
+            config: config.clone(),
+        };
 
-    let app = app.with_state(mcp_add_state);
-    let app = axum::Router::new().nest("/contextforge-rs", app);
+        let app = axum::Router::new()
+            .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
+            .layer(middleware::from_fn_with_state(mcp_add_state.clone(), user_config_store_layer))
+            .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
+            .layer(SessionIdLayer)
+            .layer(middleware::from_fn(virtual_host_id_layer))
+            .layer(cors_layer);
 
-    let mut handlers = vec![];
+        #[cfg(feature = "with_tools")]
+        let app = tools::add_tools(app);
 
-    if let Some(tcp) = Option::<Tcp>::try_from(&config)? {
-        handlers.push(tcp.handle_tcp(app.clone()).boxed());
+        let app = app.with_state(mcp_add_state);
+        let app = axum::Router::new().nest("/contextforge-rs", app);
+
+        let mut handlers = vec![];
+
+        if let Some(tcp) = Option::<Tcp>::try_from(config)? {
+            handlers.push(tcp.handle_tcp(app.clone()).boxed());
+        }
+
+        if let Some(tls) = Option::<DownstreamTls>::try_from(config)? {
+            handlers.push(tls.handle_tls(app.clone()).boxed());
+        }
+
+        let _ = futures::future::join_all(handlers).await;
+
+        Ok(())
     }
-
-    if let Some(tls) = Option::<DownstreamTls>::try_from(&config)? {
-        handlers.push(tls.handle_tls(app.clone()).boxed());
-    }
-
-    let _ = futures::future::join_all(handlers).await;
-
-    Ok(())
 }

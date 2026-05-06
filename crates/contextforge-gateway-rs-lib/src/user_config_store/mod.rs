@@ -48,6 +48,12 @@ pub struct User<'a> {
     key: &'a str,
 }
 
+impl User<'_> {
+    pub fn key(&self) -> &str {
+        self.key
+    }
+}
+
 impl<'a> User<'a> {
     pub fn new(key: &'a str) -> Self {
         Self { name: "UserConfig", key }

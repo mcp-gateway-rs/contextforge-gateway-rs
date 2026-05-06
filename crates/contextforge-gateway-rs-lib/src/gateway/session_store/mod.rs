@@ -17,7 +17,7 @@ pub struct SessionMap {
 }
 
 impl SessionMap {
-    #[expect(dead_code, reason = "session mapping access is used by store implementations as they evolve")]
+    #[allow(dead_code, reason = "session mapping access is used by store implementations as they evolve")]
     pub fn session(&self) -> Option<Arc<str>> {
         self.upstream_session_id.clone()
     }
@@ -29,17 +29,16 @@ pub struct SessionMapping {
     pub session_mapping: Vec<SessionMap>,
 }
 
+#[allow(dead_code, reason = "session mapping access is used by store implementations as they evolve")]
 impl SessionMapping {
-    #[expect(dead_code, reason = "session mapping helpers are used by alternate session stores")]
     pub fn new() -> Self {
         Self { session_mapping: vec![] }
     }
-    #[expect(dead_code, reason = "session mapping helpers are used by alternate session stores")]
+
     pub fn push(&mut self, host: String, upstream_session: Option<&Arc<str>>) {
         self.session_mapping.push(SessionMap { upstream_session_id: upstream_session.cloned(), backend_name: host });
     }
 
-    #[expect(dead_code, reason = "session mapping helpers are used by alternate session stores")]
     pub fn get<'a>(&'a self, host: &'a str) -> Option<&'a SessionMap> {
         self.session_mapping.iter().find(|m| m.backend_name == host)
     }

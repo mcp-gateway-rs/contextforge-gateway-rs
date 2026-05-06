@@ -4,7 +4,7 @@ mod runtime;
 use std::sync::Arc;
 
 use clap::Parser;
-use contextforge_gateway_rs_lib::Config;
+use contextforge_gateway_rs_lib::{Config, Gateway, RedisClient, RedisConfig, RedisUserConfigStore};
 
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 
@@ -18,11 +18,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("contextforge-gateway-rs {config:?}");
     let _guard = logging::init_tracing_logging(&config);
 
-    let local_session_manager = Arc::new(LocalSessionManager::default());
-
     let runtime = runtime::Runtime::from(&config);
 
-    _ = runtime.execute(config, local_session_manager);
+    let user_config_store = RedisUserConfigStore::new(RedisClient::open(RedisConfig::try_from(&config)?)?);
+    let gateway = Gateway::builder()
+        .with_config(config)
+        .with_user_config_store(Arc::new(user_config_store))
+        .with_session_manager(Arc::new(LocalSessionManager::default()))
+        .build();
+
+    _ = runtime.execute(gateway);
 
     Ok(())
 }

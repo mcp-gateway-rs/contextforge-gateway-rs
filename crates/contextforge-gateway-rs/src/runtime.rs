@@ -1,11 +1,6 @@
-use contextforge_gateway_rs_lib::Config;
-use futures::{FutureExt, future::BoxFuture};
-use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
-use std::{pin::Pin, sync::Arc, thread};
-use tokio::{
-    io,
-    runtime::{Builder, LocalOptions, Runtime as TokioRuntime},
-};
+use contextforge_gateway_rs_lib::{Config, Gateway};
+use std::thread;
+use tokio::runtime::{Builder, LocalOptions};
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone)]
@@ -26,11 +21,6 @@ impl<'b> From<&'b Config> for Runtime {
             ..Default::default()
         }
     }
-}
-
-pub enum RuntimeType {
-    MultipleRuntimes(Vec<io::Result<TokioRuntime>>),
-    SingleRuntime(io::Result<TokioRuntime>),
 }
 
 impl Default for Runtime {
@@ -68,18 +58,14 @@ impl Runtime {
         builder.enable_all().name(thread_name).global_queue_interval(1024).max_io_events_per_tick(4);
     }
 
-    pub fn execute(
-        self,
-        config: Config,
-        session_manager: Arc<LocalSessionManager>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    pub fn execute(self, gateway: Gateway) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
         if self.single_runtime {
             let mut builder = Builder::new_multi_thread();
             self.configure_builder(&mut builder, self.thread_name.to_owned());
             let runtime = builder.build()?;
             runtime.block_on(async {
                 tokio::select! {
-                    res = contextforge_gateway_rs_lib::run_gateway(config, session_manager) =>
+                    res = gateway.run_gateway() =>
                         if res.is_ok(){
                             debug!("Gateway process terminated");
                         }else{
@@ -93,8 +79,9 @@ impl Runtime {
                 .map(|i| {
                     let thread_name = self.thread_name.clone();
                     let runtime = self.clone();
-                    let config = config.clone();
-                    let session_manager = session_manager.clone();
+                    let gateway = gateway.clone();
+                    // let config = config.clone();
+                    // let session_manager = session_manager.clone();
                     thread::Builder::new().name("contextforge-gateway-rs-{i}".to_owned()).spawn(move || {
                         let mut builder = Builder::new_current_thread();
 
@@ -107,7 +94,7 @@ impl Runtime {
 
                         runtime.block_on(async {
                             tokio::select! {
-                                res = contextforge_gateway_rs_lib::run_gateway(config, session_manager) =>
+                                res = gateway.run_gateway() =>
                                     if res.is_ok(){
                                         debug!("Gateway process terminated");
                                     }else{

@@ -5,49 +5,17 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{Router, get, post},
 };
-use chrono::{Duration, Utc};
 
 use http::{StatusCode, header};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 
-use serde::{Deserialize, Serialize};
 use std::fs;
 //use tracing::debug;
 
-use url::Url;
-
 use crate::{
-    common::ContextForgeGatewayAppState,
-    const_values::CONEXT_FORGE_GATEWAY_AUDIENCE,
+    common::{ContextForgeGatewayAppState, DefaultClaims},
     user_config_store::{User, UserConfig},
 };
-
-#[derive(Deserialize, Serialize)]
-struct DefaultClaims {
-    iss: Url,
-    sub: String,
-    aud: String,
-    exp: i64,
-    iat: Option<i64>,
-    userinfo: openid::Userinfo,
-}
-
-impl DefaultClaims {
-    fn new(user_id: String) -> Self {
-        let url = "http://contextforge-gateway-rs".parse().expect("Expecting this to work");
-        let audience = CONEXT_FORGE_GATEWAY_AUDIENCE.to_owned();
-        let user_info = openid::Userinfo { sub: user_id.clone(), ..Default::default() };
-        Self {
-            iss: url,
-            sub: user_id,
-            aud: audience,
-            exp: (Utc::now() + Duration::hours(1)).timestamp(),
-            iat: Some(Utc::now().timestamp()),
-
-            userinfo: user_info,
-        }
-    }
-}
 
 pub fn add_tools(router: Router<ContextForgeGatewayAppState>) -> Router<ContextForgeGatewayAppState> {
     router
