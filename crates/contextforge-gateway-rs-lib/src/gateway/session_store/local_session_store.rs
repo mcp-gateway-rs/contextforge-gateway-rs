@@ -1,14 +1,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-
 use lru_time_cache::LruCache;
-
 use tokio::sync::Mutex;
 
-use crate::const_values::{LRU_CACHE_ENTRIES, LRU_CACHE_EXPIRY_DURATION};
-
 use super::{SessionMapping, SessionStoreError, UserSession, UserSessionStore};
+use crate::const_values::{LRU_CACHE_ENTRIES, LRU_CACHE_EXPIRY_DURATION};
 
 #[derive(Clone)]
 pub struct LocalUserSessionStore {

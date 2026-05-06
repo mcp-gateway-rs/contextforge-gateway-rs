@@ -1,7 +1,6 @@
 use axum::{body::Body, extract::State, middleware::Next, response::Response};
 use http::{StatusCode, header};
 use openid::Claims;
-
 use tracing::{debug, info, warn};
 
 use crate::{

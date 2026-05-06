@@ -4,11 +4,9 @@ mod redis_config_store;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-
-use serde::{Deserialize, Serialize};
-
 //pub use inmemory_config_store::InMemoryUserConfigStore;
 pub use redis_config_store::RedisUserConfigStore;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

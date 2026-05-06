@@ -24,6 +24,7 @@ num_cpus = "1.17.0"
 rmcp.workspace = true
 tikv-jemallocator = "0.6.1"
 futures.workspace = true
+rustls.workspace = true
 
 [lints]
 workspace = true

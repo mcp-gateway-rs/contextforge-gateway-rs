@@ -6,7 +6,6 @@ use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use rustls::ServerConfig;
 use rustls_pki_types::{self, CertificateDer, PrivateKeyDer, pem::PemObject};
-
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tower::Service;
@@ -25,11 +24,11 @@ impl TryFrom<&Config> for Option<DownstreamTls> {
     fn try_from(config: &Config) -> Result<Self, Self::Error> {
         match (config.tls_address.clone(), config.server_certificate.clone(), config.server_private_key.clone()) {
             (Some(address), Some(certificate), Some(private_key)) => {
-                let certificate = CertificateDer::from_pem_file(&certificate)?;
+                let certificates = CertificateDer::pem_file_iter(&certificate)?.flatten().collect::<Vec<_>>();
                 let private_key = PrivateKeyDer::from_pem_file(&private_key)?;
                 let server_config = ServerConfig::builder_with_protocol_versions(rustls::ALL_VERSIONS)
                     .with_no_client_auth()
-                    .with_single_cert(vec![certificate], private_key)?;
+                    .with_single_cert(certificates, private_key)?;
 
                 if let Some(tcp_address) = config.address
                     && tcp_address == address
@@ -40,8 +39,8 @@ impl TryFrom<&Config> for Option<DownstreamTls> {
                 let tcp = Tcp::new(address);
                 Ok(Some(DownstreamTls { tcp, server_config }))
             },
-            (None, _, _) => Ok(None),
-            (Some(_), _, _) => Err("Invalid tls config... configuration missing ".into()),
+            (None, ..) => Ok(None),
+            (Some(_), ..) => Err("Invalid tls config... configuration missing ".into()),
         }
     }
 }
@@ -54,13 +53,6 @@ impl DownstreamTls {
 
         let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
 
-        // Ok(axum::serve_tls(tls_acceptor, service)
-        //     .with_graceful_shutdown(async {
-        //         tokio::signal::ctrl_c().await.ok();
-        //         info!("Shutting down...");
-        //     })
-        //     .await?)
-
         loop {
             tokio::select! {
                     // here we accept a connection, and then start processing it.
@@ -68,7 +60,6 @@ impl DownstreamTls {
                     maybe_stream = tcp_listener.accept() => {
                         let tower_service = service.clone();
                         let tls_acceptor = tls_acceptor.clone();
-
 
                         if let Ok((tcp_stream, addr)) = maybe_stream {
                             tokio::spawn(async move {
@@ -95,6 +86,9 @@ impl DownstreamTls {
                             warn!("Problem during TCP handshake {maybe_stream:?}");
                             continue;
                         };
+                    }
+                    _= tokio::signal::ctrl_c()=>{
+                        return Ok(())
                     }
 
             }

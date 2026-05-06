@@ -2,7 +2,6 @@ use std::{env, fs, sync::Arc};
 
 use axum::middleware;
 use axum_jwt_auth::LocalDecoder;
-
 use futures::FutureExt;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rmcp::transport::{
@@ -22,14 +21,15 @@ mod tests;
 mod tools;
 
 mod user_config_store;
+pub use common::{RedisClient, RedisConfig};
 use gateway::McpService;
 use layers::session_id::SessionId;
-
 use tower_http::cors::{Any, CorsLayer};
-
 use transports::{DownstreamTls, Tcp};
 use typed_builder::TypedBuilder;
+pub use user_config_store::RedisUserConfigStore;
 
+pub use crate::common::Config;
 use crate::{
     common::ContextForgeGatewayAppState,
     const_values::CONEXT_FORGE_GATEWAY_AUDIENCE,
@@ -40,10 +40,6 @@ use crate::{
     },
     user_config_store::UserConfigStore,
 };
-
-pub use crate::common::Config;
-pub use common::{RedisClient, RedisConfig};
-pub use user_config_store::RedisUserConfigStore;
 
 #[derive(Clone, TypedBuilder)]
 #[builder(field_defaults(setter(prefix = "with_")))]
@@ -65,7 +61,7 @@ impl Gateway {
 
         let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
 
-        let reqwest_backend_client = reqwest::Client::builder().build()?;
+        let reqwest_backend_client = reqwest::Client::try_from(config)?;
 
         // Create streamable HTTP service
         let mcp_service: StreamableHttpService<McpService<LocalUserSessionStore>, LocalSessionManager> =

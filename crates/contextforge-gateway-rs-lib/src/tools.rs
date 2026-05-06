@@ -1,3 +1,5 @@
+use std::fs;
+
 use axum::{
     Json,
     body::Body,
@@ -5,13 +7,10 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{Router, get, post},
 };
-
 use http::{StatusCode, header};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 
-use std::fs;
 //use tracing::debug;
-
 use crate::{
     common::{ContextForgeGatewayAppState, DefaultClaims},
     user_config_store::{User, UserConfig},

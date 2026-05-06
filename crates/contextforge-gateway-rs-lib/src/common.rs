@@ -1,4 +1,10 @@
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{
+    fs::{self, File},
+    io::Read,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::Arc,
+};
 
 use axum_jwt_auth::JwtDecoder;
 use chrono::{Duration, Utc};
@@ -7,10 +13,8 @@ use http::uri::Authority;
 use openid::{CompactJson, CustomClaims, StandardClaims};
 use redis::{ConnectionAddr, IntoConnectionInfo};
 use serde::{Deserialize, Serialize};
-use url::Url;
-
-use std::net::SocketAddr;
 use thiserror::Error;
+use url::Url;
 
 use crate::{const_values::CONEXT_FORGE_GATEWAY_AUDIENCE, user_config_store::UserConfigStore};
 
@@ -100,8 +104,11 @@ pub struct Config {
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TLS_UPSTREAM_PRIVATE_KEY")]
     pub upstream_private_key: Option<PathBuf>,
 
-    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TLS_UPSTREAM__CERTIFICATE")]
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TLS_UPSTREAM_CERTIFICATE")]
     pub upstream_certificate: Option<PathBuf>,
+
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TLS_UPSTREAM_TRUST_BUNDLE")]
+    pub upstream_trust_bundle: Option<PathBuf>,
 }
 
 #[derive(Error, Debug)]
@@ -134,6 +141,19 @@ impl TryFrom<&Config> for reqwest::Client {
             },
             Some(UpstreamConnectionMode::MtlsOnly) => builder.https_only(true).identity(extract_identity(config)?),
         };
+
+        let builder = if let Some(trust_bundle) = config.upstream_trust_bundle.as_ref() {
+            let mut buf = Vec::new();
+            File::open(trust_bundle)?.read_to_end(&mut buf)?;
+            let certificates = reqwest::Certificate::from_pem_bundle(&mut buf)?;
+            builder.tls_certs_merge(certificates)
+        } else {
+            builder
+        };
+        // let mut header_map = HeaderMap::new();
+        // //header_map.insert(http::header::HOST, HeaderValue::from_static("127.0.0.1"));
+        //let builder = builder.indefault_headers(header_map);
+
         Ok(builder.build()?)
     }
 }

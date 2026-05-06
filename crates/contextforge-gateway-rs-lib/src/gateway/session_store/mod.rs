@@ -4,11 +4,9 @@ mod redis_session_store;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-
-use serde::{Deserialize, Serialize};
-
 //pub use inmemory_config_store::InMemoryUserSessionStore;
 pub use local_session_store::LocalUserSessionStore;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SessionMap {

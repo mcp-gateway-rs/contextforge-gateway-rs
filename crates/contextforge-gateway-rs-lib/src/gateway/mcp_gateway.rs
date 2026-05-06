@@ -1,38 +1,38 @@
-use std::collections::HashMap;
-use std::{collections::HashSet, sync::Arc};
-
-use super::mcp_call_validator::AuthorizedCallValidator;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use http::request::Parts;
 use itertools::Itertools;
-use rmcp::RoleClient;
-use rmcp::model::{ErrorCode, Resource};
-use rmcp::service::RunningService;
-use rmcp::transport::StreamableHttpClientTransport;
-use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::{
-    ErrorData, RoleServer, ServerHandler, ServiceExt,
+    ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt,
     model::{
         AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo,
-        GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
+        ErrorCode, GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
         ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, LoggingLevel,
         PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole,
-        RawImageContent, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference,
+        RawImageContent, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference, Resource,
         ServerCapabilities, SetLevelRequestParams, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
     },
-    service::RequestContext,
+    service::{RequestContext, RunningService},
+    transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
-
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 use typed_builder::TypedBuilder;
 
-use crate::gateway::mcp_call_validator::InitializeCallValidator;
-use crate::gateway::session_manager::SessionManager;
+use super::mcp_call_validator::AuthorizedCallValidator;
 pub use crate::gateway::session_store::LocalUserSessionStore;
-
-use crate::gateway::session_store::{UserSession, UserSessionStore};
-use crate::{SessionId, user_config_store::UserConfig};
+use crate::{
+    SessionId,
+    gateway::{
+        mcp_call_validator::InitializeCallValidator,
+        session_manager::SessionManager,
+        session_store::{UserSession, UserSessionStore},
+    },
+    user_config_store::UserConfig,
+};
 
 #[derive(Clone, TypedBuilder)]
 #[builder(field_defaults(setter(prefix = "with_")))]
@@ -137,7 +137,17 @@ where
                 let downstream_session_id = downstream_session_id.clone();
 
                     Box::pin(async move {
-                        let config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string());
+                        let mut headers = HashMap::new();
+                        if let Some(host) = backend_url.host_str() && backend_url.scheme() == "https"{
+                            if let Ok(value) = http::HeaderValue::from_str(host){
+                                headers.insert(http::header::HOST, value);
+                            }else{
+                                warn!("Really can't set the host header for {:?}",backend_url.host_str());
+                            }
+                        };
+
+                        let config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string())
+                            .custom_headers(headers);
                         let transport = StreamableHttpClientTransport::with_client(client, config);
                         let maybe_running_service = request.serve(transport).await;
                         if let Ok(running_service) = maybe_running_service {
@@ -148,7 +158,6 @@ where
                             (name, None)
                         }
                     })
-                //)
             }).collect();
 
         let initialization_results: Vec<(&String, Option<RunningService<RoleClient, InitializeRequestParams>>)> =
@@ -160,7 +169,12 @@ where
                 info!("initialize: Adding transport: session_id {downstream_session_id:#?} backend {name} {running_service:?}");
 
                 let server_capabilities =
-                    running_service.as_ref().and_then(|rs| rs.peer().peer_info().as_ref().map(|pi| pi.capabilities.clone()));
+                    running_service.as_ref()
+                        .and_then(|rs|
+                            rs.peer()
+                                .peer_info()
+                                .as_ref()
+                                .map(|pi| pi.capabilities.clone()));
                 (
                     (name.clone(), server_capabilities.clone()),
                     (name.clone(), BackendTransportService::from((server_capabilities, running_service))),

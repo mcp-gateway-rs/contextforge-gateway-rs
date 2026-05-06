@@ -1,3 +1,4 @@
+use contextforge_gateway_rs_lib::Config;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::trace::{RandomIdGenerator, Sampler};
@@ -8,8 +9,6 @@ use tracing_subscriber::{
     layer::SubscriberExt,
     util::SubscriberInitExt,
 };
-
-use contextforge_gateway_rs_lib::Config;
 
 #[allow(dead_code)]
 pub enum Guard {

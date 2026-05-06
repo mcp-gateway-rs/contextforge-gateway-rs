@@ -1,5 +1,6 @@
-use contextforge_gateway_rs_lib::{Config, Gateway};
 use std::thread;
+
+use contextforge_gateway_rs_lib::{Config, Gateway};
 use tokio::runtime::{Builder, LocalOptions};
 use tracing::{debug, error, info, warn};
 
