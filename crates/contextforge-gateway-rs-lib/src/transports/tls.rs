@@ -11,7 +11,7 @@ use tokio_rustls::TlsAcceptor;
 use tower::Service;
 use tracing::{error, info, warn};
 
-use crate::{Config, transports::tcp::Tcp};
+use crate::{Config, Error, transports::tcp::Tcp};
 
 pub struct DownstreamTls {
     tcp: Tcp,
@@ -19,10 +19,10 @@ pub struct DownstreamTls {
 }
 
 impl TryFrom<&Config> for Option<DownstreamTls> {
-    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+    type Error = Error;
 
     fn try_from(config: &Config) -> Result<Self, Self::Error> {
-        match (config.tls_address.clone(), config.server_certificate.clone(), config.server_private_key.clone()) {
+        match (config.tls_address, config.server_certificate.clone(), config.server_private_key.clone()) {
             (Some(address), Some(certificate), Some(private_key)) => {
                 let certificates = CertificateDer::pem_file_iter(&certificate)?.flatten().collect::<Vec<_>>();
                 let private_key = PrivateKeyDer::from_pem_file(&private_key)?;
@@ -46,7 +46,7 @@ impl TryFrom<&Config> for Option<DownstreamTls> {
 }
 
 impl DownstreamTls {
-    pub async fn handle_tls(self, service: Router) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    pub async fn handle_tls(self, service: Router) -> crate::Result<()> {
         let DownstreamTls { tcp, server_config } = self;
         info!("Starting TLS listener at {}", tcp.address);
         let tcp_listener: TcpListener = tcp.try_into()?;
@@ -55,8 +55,6 @@ impl DownstreamTls {
 
         loop {
             tokio::select! {
-                    // here we accept a connection, and then start processing it.
-                    //  we spawn early so that we don't block other connections from being accepted due to a slow client
                     maybe_stream = tcp_listener.accept() => {
                         let tower_service = service.clone();
                         let tls_acceptor = tls_acceptor.clone();
@@ -84,7 +82,7 @@ impl DownstreamTls {
                             })
                         } else {
                             warn!("Problem during TCP handshake {maybe_stream:?}");
-                            continue;
+                            return Err(maybe_stream.expect_err("Expect this to work").into());
                         };
                     }
                     _= tokio::signal::ctrl_c()=>{

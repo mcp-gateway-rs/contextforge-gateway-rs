@@ -1,4 +1,6 @@
+#![allow(clippy::pedantic)]
 #![allow(dead_code)]
+
 use std::{any::Any, sync::Arc};
 
 use rmcp::{
@@ -74,7 +76,7 @@ impl Counter {
     }
 
     fn _create_resource_text(&self, uri: &str, name: &str) -> Resource {
-        RawResource::new(uri, name.to_string()).no_annotation()
+        RawResource::new(uri, name.to_owned()).no_annotation()
     }
 
     #[tool(description = "Increment the counter by 1")]
@@ -157,7 +159,7 @@ impl Counter {
         Parameters(args): Parameters<CounterAnalysisArgs>,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<GetPromptResult, McpError> {
-        let strategy = args.strategy.unwrap_or_else(|| "careful".to_string());
+        let strategy = args.strategy.unwrap_or_else(|| "careful".to_owned());
         let current_value = *self.counter.lock().await;
         let difference = args.goal - current_value;
 
@@ -194,7 +196,7 @@ impl ServerHandler for Counter {
         )
         .with_server_info(Implementation::from_build_env())
         .with_protocol_version(ProtocolVersion::V_2024_11_05)
-        .with_instructions("This server provides counter tools and prompts. Tools: increment, decrement, get_value, say_hello, echo, sum. Prompts: example_prompt (takes a message), counter_analysis (analyzes counter state with a goal).".to_string())
+        .with_instructions("This server provides counter tools and prompts. Tools: increment, decrement, get_value, say_hello, echo, sum. Prompts: example_prompt (takes a message), counter_analysis (analyzes counter state with a goal).".to_owned())
     }
 
     async fn list_resources(

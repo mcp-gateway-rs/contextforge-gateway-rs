@@ -43,7 +43,7 @@ impl UserConfigStore for MockedUserConfigStore {
                 return Err(ConfigStoreError::NoDataForKey);
             };
 
-            let Ok(user_config) = rmp_serde::decode::from_slice::<UserConfig>(&user_config) else {
+            let Ok(user_config) = rmp_serde::decode::from_slice::<UserConfig>(user_config) else {
                 return Err(ConfigStoreError::DataWrongFormat);
             };
 

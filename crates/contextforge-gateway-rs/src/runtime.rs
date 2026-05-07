@@ -5,6 +5,7 @@ use tokio::runtime::{Builder, LocalOptions};
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_field_names)]
 pub struct Runtime {
     single_runtime: bool,
     number_of_threads: usize,
@@ -55,14 +56,14 @@ impl Runtime {
         }
     }
 
-    fn configure_single_thread_builder(&self, builder: &mut Builder, thread_name: String) {
+    fn configure_single_thread_builder(builder: &mut Builder, thread_name: String) {
         builder.enable_all().name(thread_name).global_queue_interval(1024).max_io_events_per_tick(4);
     }
 
-    pub fn execute(self, gateway: Gateway) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    pub fn execute(self, gateway: Gateway) -> contextforge_gateway_rs_lib::Result<()> {
         if self.single_runtime {
             let mut builder = Builder::new_multi_thread();
-            self.configure_builder(&mut builder, self.thread_name.to_owned());
+            self.configure_builder(&mut builder, self.thread_name.clone());
             let runtime = builder.build()?;
             runtime.block_on(async {
                 tokio::select! {
@@ -79,14 +80,11 @@ impl Runtime {
             let handles = (0..self.number_of_threads)
                 .map(|i| {
                     let thread_name = self.thread_name.clone();
-                    let runtime = self.clone();
                     let gateway = gateway.clone();
-                    // let config = config.clone();
-                    // let session_manager = session_manager.clone();
                     thread::Builder::new().name("contextforge-gateway-rs-{i}".to_owned()).spawn(move || {
                         let mut builder = Builder::new_current_thread();
 
-                        runtime.configure_single_thread_builder(&mut builder, format!("{}{}", thread_name, i));
+                        Self::configure_single_thread_builder(&mut builder, format!("{thread_name}{i}"));
                         let maybe_runtime = builder.build_local(LocalOptions::default());
                         let Ok(runtime) = maybe_runtime else {
                             warn!("Can't build thread {maybe_runtime:?}");
@@ -108,14 +106,14 @@ impl Runtime {
                 })
                 .collect::<Vec<_>>();
 
-            handles.into_iter().for_each(|maybe_handle| {
+            for maybe_handle in handles {
                 if let Ok(handle) = maybe_handle {
                     let res = handle.join();
                     info!("Thread terminated with {res:?}");
                 } else {
                     warn!("Thread terminated at start with {maybe_handle:?}");
                 }
-            });
+            }
             Ok(())
         }
     }

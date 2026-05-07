@@ -7,11 +7,9 @@ use std::{
     time::Duration,
 };
 
-use axum_server;
 use futures::{FutureExt, future::BoxFuture};
 use http::{HeaderMap, HeaderValue};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use openport;
 use rmcp::{
     ServiceExt,
     model::InitializeRequestParams,
@@ -35,20 +33,20 @@ const MOCK_COUNTER_TOOL_NAMES: &[&str] =
     &["decrement", "echo", "get_session_id", "get_value", "increment", "long_task", "say_hello", "sum"];
 
 fn create_ports(ports: usize) -> Vec<u16> {
-    (0..ports).into_iter().map(|_| openport::pick_random_unused_port().expect("Expecting to find port")).collect()
+    (0..ports).map(|_| openport::pick_random_unused_port().expect("Expecting to find port")).collect()
 }
 
 fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPGateway> {
     ports
         .iter()
-        .filter_map(|port| {
+        .map(|port| {
             let url = if with_tls {
                 format!("https://127.0.0.1:{port}/mcp").parse().expect("This should work")
             } else {
                 format!("http://127.0.0.1:{port}/mcp").parse().expect("This should work")
             };
 
-            Some((format!("backend-{port}"), BackendMCPGateway { url }))
+            (format!("backend-{port}"), BackendMCPGateway { url })
         })
         .collect::<HashMap<_, _>>()
 }
@@ -62,10 +60,7 @@ fn create_tool_names(ports: &[u16]) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
-fn create_axum_servers(
-    ports: &[u16],
-    router: axum::Router,
-) -> Vec<BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>>> {
+fn create_axum_servers(ports: &[u16], router: &axum::Router) -> Vec<BoxFuture<'static, crate::Result<()>>> {
     ports
         .iter()
         .map(|port| {
@@ -81,10 +76,7 @@ fn create_axum_servers(
         .collect()
 }
 
-async fn create_axum_tls_servers(
-    ports: &[u16],
-    router: axum::Router,
-) -> Vec<BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>>> {
+async fn create_axum_tls_servers(ports: &[u16], router: axum::Router) -> Vec<BoxFuture<'static, crate::Result<()>>> {
     let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(
         "../../assets/contextforgeCA/contextforge-server.cert.pem",
         "../../assets/contextforgeCA/contextforge-server.key.pem",
@@ -120,15 +112,12 @@ pub fn get_token(user_id: String) -> String {
 }
 
 struct TestSettings {
-    handle: tokio::task::JoinHandle<Vec<Result<(), Box<dyn std::error::Error + Send + Sync>>>>,
+    handle: tokio::task::JoinHandle<Vec<crate::Result<()>>>,
     gateway_url: String,
     expected_tool_names: Vec<String>,
 }
 
-async fn create_gateway_with_four_counters(
-    user: &str,
-    config: Config,
-) -> Result<TestSettings, Box<dyn std::error::Error + Send + Sync + 'static>> {
+async fn create_gateway_with_four_counters(user: &str, config: Config) -> crate::Result<TestSettings> {
     let mocked_user_config_store = MockedUserConfigStore::default();
 
     let gateway_one_ports = create_ports(2);
@@ -172,9 +161,7 @@ async fn create_gateway_with_four_counters(
         .with_session_manager(Arc::new(LocalSessionManager::default()))
         .build();
 
-    let gateway: std::pin::Pin<
-        Box<dyn Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>> + Send>,
-    > = async move {
+    let gateway = async move {
         let res = gateway.run_gateway().await;
         warn!("Gateway exited with result {res:?}");
         Ok(())
@@ -182,13 +169,13 @@ async fn create_gateway_with_four_counters(
     .boxed();
 
     if let Some(address) = config.address.as_ref() {
-        let gateway_url = format!("http://{}/contextforge-rs/servers/{}/mcp", address.to_string(), virtual_host_one_id);
+        let gateway_url = format!("http://{address}/contextforge-rs/servers/{virtual_host_one_id}/mcp");
 
-        let servers_one = create_axum_servers(&gateway_one_ports, router.clone());
-        let servers_two = create_axum_servers(&gateway_two_ports, router.clone());
+        let servers_one = create_axum_servers(&gateway_one_ports, &router);
+        let servers_two = create_axum_servers(&gateway_two_ports, &router);
         let handle: tokio::task::JoinHandle<Vec<Result<(), Box<dyn std::error::Error + Send + Sync>>>> =
             tokio::spawn(futures::future::join_all(
-                vec![gateway].into_iter().chain(servers_one.into_iter()).chain(servers_two.into_iter()), //.chain(vec![test_future].into_iter()),
+                vec![gateway].into_iter().chain(servers_one).chain(servers_two), //.chain(vec![test_future].into_iter()),
             ));
 
         Ok(TestSettings { handle, gateway_url, expected_tool_names: virtual_host_one_tool_names })
@@ -197,10 +184,7 @@ async fn create_gateway_with_four_counters(
     }
 }
 
-async fn create_tls_gateway_with_four_tls_counters(
-    user: &str,
-    config: Config,
-) -> Result<TestSettings, Box<dyn std::error::Error + Send + Sync + 'static>> {
+async fn create_tls_gateway_with_four_tls_counters(user: &str, config: Config) -> crate::Result<TestSettings> {
     let mocked_user_config_store = MockedUserConfigStore::default();
 
     let gateway_one_ports = create_ports(2);
@@ -244,9 +228,7 @@ async fn create_tls_gateway_with_four_tls_counters(
         .with_session_manager(Arc::new(LocalSessionManager::default()))
         .build();
 
-    let gateway: std::pin::Pin<
-        Box<dyn Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>> + Send>,
-    > = async move {
+    let gateway = async move {
         let res = gateway.run_gateway().await;
         warn!("Gateway exited with result {res:?}");
         Ok(())
@@ -254,15 +236,12 @@ async fn create_tls_gateway_with_four_tls_counters(
     .boxed();
 
     if let Some(address) = config.tls_address.as_ref() {
-        let gateway_url =
-            format!("https://{}/contextforge-rs/servers/{}/mcp", address.to_string(), virtual_host_one_id);
+        let gateway_url = format!("https://{address}/contextforge-rs/servers/{virtual_host_one_id}/mcp");
 
         let servers_one = create_axum_tls_servers(&gateway_one_ports, router.clone()).await;
         let servers_two = create_axum_tls_servers(&gateway_two_ports, router.clone()).await;
         let handle: tokio::task::JoinHandle<Vec<Result<(), Box<dyn std::error::Error + Send + Sync>>>> =
-            tokio::spawn(futures::future::join_all(
-                vec![gateway].into_iter().chain(servers_one.into_iter()).chain(servers_two.into_iter()), //.chain(vec![test_future].into_iter()),
-            ));
+            tokio::spawn(futures::future::join_all(vec![gateway].into_iter().chain(servers_one).chain(servers_two)));
 
         Ok(TestSettings { handle, gateway_url, expected_tool_names: virtual_host_one_tool_names })
     } else {
@@ -272,13 +251,15 @@ async fn create_tls_gateway_with_four_tls_counters(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
-async fn plaintext_list_tools_end_to_end_test() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+async fn plaintext_list_tools_end_to_end_test() -> crate::Result<()> {
     let gateway_port = create_ports(1)[0];
 
-    let mut config = Config::default();
-    config.address = Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work"));
-    config.token_verification_public_key = "../../assets/jwt.key.pub".into();
-    config.upstream_connection_mode = Some(crate::common::UpstreamConnectionMode::PlainTextAndTls);
+    let config = Config {
+        address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
+        token_verification_public_key: "../../assets/jwt.key.pub".into(),
+        upstream_connection_mode: Some(crate::common::UpstreamConnectionMode::PlainTextAndTls),
+        ..Default::default()
+    };
 
     let user = "admin@example.com";
 
@@ -288,10 +269,7 @@ async fn plaintext_list_tools_end_to_end_test() -> Result<(), Box<dyn std::error
         panic!("Invalid configuration ");
     };
 
-    let test_future: std::pin::Pin<
-        Box<dyn Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>> + Send>,
-    > = async {
-        //let _ = test_semaphore.acquire().await;
+    let test_future: BoxFuture<'_, crate::Result<()>> = async {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let mut default_headers = HeaderMap::new();
         let token = get_token(user.to_owned());
@@ -336,7 +314,7 @@ async fn plaintext_list_tools_end_to_end_test() -> Result<(), Box<dyn std::error
     let maybe_passed = test_future.await;
 
     handle.abort();
-    if let Ok(_) = maybe_passed {
+    if maybe_passed.is_ok() {
         info!("Test passed");
     } else {
         info!("Test NOT passed {maybe_passed:?}");
@@ -348,22 +326,22 @@ async fn plaintext_list_tools_end_to_end_test() -> Result<(), Box<dyn std::error
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
-async fn tls_list_tools_end_to_end_test() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+async fn tls_list_tools_end_to_end_test() -> crate::Result<()> {
     let provider = crypto::ring::default_provider();
     _ = provider.install_default();
     let gateway_port = create_ports(1)[0];
-
-    let mut config = Config::default();
-
-    config.token_verification_public_key = "../../assets/jwt.key.pub".into();
-
     let server_socket_addr: std::net::SocketAddr =
         format!("127.0.0.1:{gateway_port}").parse().expect("This should work");
-    config.tls_address = Some(server_socket_addr.clone());
-    config.server_certificate = Some("../../assets/contextforgeCA/contextforge-server.cert.pem".into());
-    config.server_private_key = Some("../../assets/contextforgeCA/contextforge-server.key.pem".into());
-    config.upstream_trust_bundle =
-        Some("../../assets/contextforgeCA/contextforge.intermediate.ca-chain.cert.pem".into());
+
+    let config = Config {
+        token_verification_public_key: "../../assets/jwt.key.pub".into(),
+        upstream_connection_mode: Some(crate::common::UpstreamConnectionMode::PlainTextAndTls),
+        tls_address: Some(server_socket_addr),
+        server_private_key: Some("../../assets/contextforgeCA/contextforge-server.key.pem".into()),
+        server_certificate: Some("../../assets/contextforgeCA/contextforge-server.cert.pem".into()),
+        upstream_trust_bundle: Some("../../assets/contextforgeCA/contextforge.intermediate.ca-chain.cert.pem".into()),
+        ..Default::default()
+    };
 
     let user = "admin@example.com";
 
@@ -373,12 +351,10 @@ async fn tls_list_tools_end_to_end_test() -> Result<(), Box<dyn std::error::Erro
         panic!("Invalid configuration ");
     };
 
-    let test_future: std::pin::Pin<
-        Box<dyn Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>> + Send>,
-    > = async {
+    let test_future: BoxFuture<crate::Result<()>> = async {
         let mut buf = Vec::new();
         File::open("../../assets/contextforgeCA/contextforge.intermediate.ca-chain.cert.pem")?.read_to_end(&mut buf)?;
-        let certificates = reqwest::Certificate::from_pem_bundle(&mut buf)?;
+        let certificates = reqwest::Certificate::from_pem_bundle(&buf)?;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
         let mut default_headers = HeaderMap::new();
@@ -429,7 +405,7 @@ async fn tls_list_tools_end_to_end_test() -> Result<(), Box<dyn std::error::Erro
     let maybe_passed = test_future.await;
 
     handle.abort();
-    if let Ok(_) = maybe_passed {
+    if maybe_passed.is_ok() {
         info!("Test passed");
     } else {
         info!("Test NOT passed {maybe_passed:?}");

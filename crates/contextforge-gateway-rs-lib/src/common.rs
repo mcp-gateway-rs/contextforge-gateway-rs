@@ -129,7 +129,7 @@ impl TryFrom<&Config> for RedisConfig {
 }
 
 impl TryFrom<&Config> for reqwest::Client {
-    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+    type Error = crate::Error;
 
     fn try_from(config: &Config) -> Result<Self, Self::Error> {
         let builder = reqwest::Client::builder();
@@ -145,20 +145,17 @@ impl TryFrom<&Config> for reqwest::Client {
         let builder = if let Some(trust_bundle) = config.upstream_trust_bundle.as_ref() {
             let mut buf = Vec::new();
             File::open(trust_bundle)?.read_to_end(&mut buf)?;
-            let certificates = reqwest::Certificate::from_pem_bundle(&mut buf)?;
+            let certificates = reqwest::Certificate::from_pem_bundle(&buf)?;
             builder.tls_certs_merge(certificates)
         } else {
             builder
         };
-        // let mut header_map = HeaderMap::new();
-        // //header_map.insert(http::header::HOST, HeaderValue::from_static("127.0.0.1"));
-        //let builder = builder.indefault_headers(header_map);
 
         Ok(builder.build()?)
     }
 }
 
-fn extract_identity(config: &Config) -> Result<reqwest::Identity, Box<dyn std::error::Error + Send + Sync + 'static>> {
+fn extract_identity(config: &Config) -> crate::Result<reqwest::Identity> {
     match (config.upstream_private_key.as_ref(), config.upstream_certificate.as_ref()) {
         (Some(private_key), Some(certificate)) => {
             let cert = fs::read(certificate)?;

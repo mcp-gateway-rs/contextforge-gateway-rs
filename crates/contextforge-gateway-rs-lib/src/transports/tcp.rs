@@ -15,7 +15,7 @@ impl Tcp {
         Self { address }
     }
 
-    pub async fn handle_tcp(self, service: Router) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    pub async fn handle_tcp(self, service: Router) -> crate::Result<()> {
         info!("Starting TCP listener at {}", self.address);
         let tcp_listener: TcpListener = self.try_into()?;
 
@@ -29,10 +29,10 @@ impl Tcp {
 }
 
 impl TryFrom<&Config> for Option<Tcp> {
-    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+    type Error = crate::Error;
 
     fn try_from(config: &Config) -> Result<Self, Self::Error> {
-        match config.address.clone() {
+        match config.address {
             Some(address) => Ok(Some(Tcp { address })),
             None => Ok(None),
         }
@@ -40,7 +40,7 @@ impl TryFrom<&Config> for Option<Tcp> {
 }
 
 impl TryInto<TcpListener> for Tcp {
-    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+    type Error = crate::Error;
 
     fn try_into(self) -> Result<TcpListener, Self::Error> {
         let address = self.address;

@@ -139,12 +139,18 @@ where
                     Box::pin(async move {
                         let mut headers = HashMap::new();
                         if let Some(host) = backend_url.host_str() && backend_url.scheme() == "https"{
-                            if let Ok(value) = http::HeaderValue::from_str(host){
+                            let host = if let Some(port) = backend_url.port(){
+                                format!("{host}:{port}")
+                            }else{
+                                host.to_owned()
+                            };
+
+                            if let Ok(value) = http::HeaderValue::from_str(&host){
                                 headers.insert(http::header::HOST, value);
                             }else{
                                 warn!("Really can't set the host header for {:?}",backend_url.host_str());
                             }
-                        };
+                        }
 
                         let config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string())
                             .custom_headers(headers);

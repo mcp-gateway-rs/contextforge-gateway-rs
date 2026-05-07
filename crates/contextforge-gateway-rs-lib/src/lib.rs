@@ -1,4 +1,4 @@
-use std::{env, fs, sync::Arc};
+use std::{fs, sync::Arc};
 
 use axum::middleware;
 use axum_jwt_auth::LocalDecoder;
@@ -30,6 +30,10 @@ use typed_builder::TypedBuilder;
 pub use user_config_store::RedisUserConfigStore;
 
 pub use crate::common::Config;
+
+pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+pub type Result<T> = std::result::Result<T, Error>;
+
 use crate::{
     common::ContextForgeGatewayAppState,
     const_values::CONEXT_FORGE_GATEWAY_AUDIENCE,
@@ -50,9 +54,7 @@ pub struct Gateway {
 }
 
 impl Gateway {
-    pub async fn run_gateway(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let path = env::current_dir()?;
-        println!("Current path {path:?}");
+    pub async fn run_gateway(self) -> Result<()> {
         let config = &self.config;
         let session_manager = self.session_manager;
         let user_config_store = self.user_config_store;
@@ -84,10 +86,16 @@ impl Gateway {
         let local_docoder = LocalDecoder::builder()
             .keys(vec![
                 DecodingKey::from_rsa_pem(&fs::read(&config.token_verification_public_key).map_err(|e| {
-                    format!("Error when creating local decoder {e:?} {:?}", config.token_verification_public_key)
+                    format!(
+                        "Error when creating local decoder {e:?} {}",
+                        config.token_verification_public_key.display()
+                    )
                 })?)
                 .map_err(|e| {
-                    format!("Error when creating local decoder {e:?} {:?}", config.token_verification_public_key)
+                    format!(
+                        "Error when creating local decoder {e:?} {}",
+                        config.token_verification_public_key.display()
+                    )
                 })?,
             ])
             .validation(validation)
