@@ -450,9 +450,9 @@ checksum = "6bd91ee7b2422bcb158d90ef4d14f75ef67f340943fc4149891dcce8f8b972a3"
 
 [[package]]
 name = "cc"
-version = "1.2.61"
+version = "1.2.62"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d16d90359e986641506914ba71350897565610e87ce0ad9e6f28569db3dd5c6d"
+checksum = "a1dce859f0832a7d088c4f1119888ab94ef4b5d6795d1ce05afb7fe159d79f98"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -3175,8 +3175,8 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "1.5.0"
-source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?branch=enabling_propagation_of_new_session_id_2#d97d104ba49efab838e9b22920658a7990b20563"
+version = "1.6.0"
+source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?branch=enabling_propagation_of_new_session_id_2#d07fa4f8d7978cd0829a09fab181437b99a81878"
 dependencies = [
  "async-trait",
  "base64",
@@ -3208,8 +3208,8 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "1.5.0"
-source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?branch=enabling_propagation_of_new_session_id_2#d97d104ba49efab838e9b22920658a7990b20563"
+version = "1.6.0"
+source = "git+https://github.com/contextforge-gateway-rs/mcp-rust-sdk?branch=enabling_propagation_of_new_session_id_2#d07fa4f8d7978cd0829a09fab181437b99a81878"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
