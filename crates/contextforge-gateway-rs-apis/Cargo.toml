@@ -12,7 +12,7 @@ keywords.workspace = true
 serde= {workspace = true, features=["derive"]}
 serde_json.workspace = true
 url = {workspace  = true, features = ["serde"] }
-schemars = {version= "1.2.1", features = ["url2"]}
+schemars = {version= "1.2.1", features = ["url2","preserve_order"]}
 
 [lints]
 workspace = true
