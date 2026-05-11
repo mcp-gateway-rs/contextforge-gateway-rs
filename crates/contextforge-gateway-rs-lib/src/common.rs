@@ -76,8 +76,8 @@ impl TryFrom<RedisConfig> for RedisClient {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum UpstreamConnectionMode {
-    PlainTextAndTls,
-    PlainTextAndMTls,
+    PlainTextOrTls,
+    PlainTextOrMTls,
     TlsOnly,
     MtlsOnly,
 }
@@ -231,12 +231,18 @@ fn validate_certs(path: &PathBuf) -> Result<Vec<u8>, ConfigValidationError> {
         .map_err(|e| ConfigValidationError::RedisConfigurationError(e.to_string()))?;
     let mut cursor = Cursor::new(buf);
 
+    let mut count = 0;
     for cert in rustls_pemfile::certs(&mut cursor) {
         if let Err(e) = cert {
             return Err(ConfigValidationError::RedisConfigurationError(e.to_string()));
         }
+        count += 1;
     }
-    Ok(cursor.into_inner())
+    if count == 0 {
+        Err(ConfigValidationError::RedisConfigurationError("No certificates provided".to_owned()))
+    } else {
+        Ok(cursor.into_inner())
+    }
 }
 
 fn validate_key(path: &PathBuf) -> Result<Vec<u8>, ConfigValidationError> {
@@ -261,8 +267,8 @@ impl TryFrom<&Config> for reqwest::Client {
         let builder = reqwest::Client::builder();
         let builder = match config.upstream_connection_mode.as_ref() {
             None | Some(UpstreamConnectionMode::TlsOnly) => builder.https_only(true),
-            Some(UpstreamConnectionMode::PlainTextAndTls) => builder.https_only(false),
-            Some(UpstreamConnectionMode::PlainTextAndMTls) => {
+            Some(UpstreamConnectionMode::PlainTextOrTls) => builder.https_only(false),
+            Some(UpstreamConnectionMode::PlainTextOrMTls) => {
                 builder.https_only(false).identity(extract_identity(config)?)
             },
             Some(UpstreamConnectionMode::MtlsOnly) => builder.https_only(true).identity(extract_identity(config)?),
