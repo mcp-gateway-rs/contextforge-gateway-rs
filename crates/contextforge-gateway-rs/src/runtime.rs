@@ -65,17 +65,13 @@ impl Runtime {
             let mut builder = Builder::new_multi_thread();
             self.configure_builder(&mut builder, self.thread_name.clone());
             let runtime = builder.build()?;
-            runtime.block_on(async {
-                tokio::select! {
-                    res = gateway.run_gateway() =>
-                        if res.is_ok(){
-                            debug!("Gateway process terminated");
-                        }else{
-                            error!("Gateway process terminated {res:?}");
-                        }
-                }
-            });
-            Ok(())
+            let result = runtime.block_on(gateway.run_gateway());
+            if result.is_ok() {
+                debug!("Gateway process terminated");
+            } else {
+                error!("Gateway process terminated {result:?}");
+            }
+            result
         } else {
             let handles = (0..self.number_of_threads)
                 .map(|i| {
@@ -85,31 +81,32 @@ impl Runtime {
                         let mut builder = Builder::new_current_thread();
 
                         Self::configure_single_thread_builder(&mut builder, format!("{thread_name}{i}"));
-                        let maybe_runtime = builder.build_local(LocalOptions::default());
-                        let Ok(runtime) = maybe_runtime else {
-                            warn!("Can't build thread {maybe_runtime:?}");
-                            return Err(maybe_runtime.err());
+                        let runtime = match builder.build_local(LocalOptions::default()) {
+                            Ok(runtime) => runtime,
+                            Err(error) => {
+                                warn!("Can't build thread {error:?}");
+                                return Err(error.into());
+                            },
                         };
 
-                        runtime.block_on(async {
-                            tokio::select! {
-                                res = gateway.run_gateway() =>
-                                    if res.is_ok(){
-                                        debug!("Gateway process terminated");
-                                    }else{
-                                        error!("Gateway process terminated {res:?}");
-                                    }
-                            }
-                        });
-                        Ok(())
+                        let result = runtime.block_on(gateway.run_gateway());
+                        if result.is_ok() {
+                            debug!("Gateway process terminated");
+                        } else {
+                            error!("Gateway process terminated {result:?}");
+                        }
+                        result
                     })
                 })
                 .collect::<Vec<_>>();
 
             for maybe_handle in handles {
                 if let Ok(handle) = maybe_handle {
-                    let res = handle.join();
-                    info!("Thread terminated with {res:?}");
+                    match handle.join() {
+                        Ok(Ok(())) => info!("Thread terminated"),
+                        Ok(Err(error)) => return Err(error),
+                        Err(error) => return Err(format!("Gateway thread panicked: {error:?}").into()),
+                    }
                 } else {
                     warn!("Thread terminated at start with {maybe_handle:?}");
                 }
