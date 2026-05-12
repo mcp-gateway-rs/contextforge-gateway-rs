@@ -90,6 +90,16 @@ pub enum RedisConnectionMode {
     Mtls,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(Default)]
+pub enum LogRotation {
+    Minutely,
+    #[default]
+    Hourly,
+    Daily,
+    Never,
+}
+
 #[derive(Debug, Clone, Parser, Default)]
 #[command(name = "contextforge-gateway-rs")]
 #[command(about = "Minimal, fast and experimental Gateway/Dataplane for ContextForge")]
@@ -150,6 +160,12 @@ pub struct Config {
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_TLS_REDIS_CLIENT_CERTIFICATE")]
     pub redis_tls_client_certificate: Option<PathBuf>,
+
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_LOG_NAME")]
+    pub log_name: Option<String>,
+
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_LOG_ROTATION")]
+    pub log_rotation: Option<LogRotation>,
 }
 
 #[derive(Error, Debug)]
