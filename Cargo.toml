@@ -2,6 +2,7 @@
 members = [
     "crates/contextforge-gateway-rs",
     "crates/contextforge-gateway-rs-apis",
+    "crates/contextforge-gateway-rs-cpex-runtime",
     "crates/contextforge-gateway-rs-lib",
     "crates/contextforge-load-test",
 ]
@@ -19,6 +20,8 @@ repository = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 
 
 [workspace.dependencies]
+contextforge-gateway-rs = { path = "./crates/contextforge-gateway-rs" }
+contextforge-gateway-rs-cpex-runtime = { path = "./crates/contextforge-gateway-rs-cpex-runtime" }
 contextforge-gateway-rs-lib = { path = "./crates/contextforge-gateway-rs-lib", features = [
     "with_tools",
 ] }
@@ -39,7 +42,9 @@ tracing-appender = "0.2.3"
 tracing-opentelemetry = "0.32.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1.48.0", features = ["full"] }
+tokio-stream = "0.1.17"
 axum = "0.8"
+anyhow = "1.0"
 tower-http = { version = "0.6.8", features = ["full"] }
 tower-layer = "0.3.3"
 tower = "0.5.3"
@@ -58,11 +63,16 @@ thiserror = "2.0.18"
 url = "2.5.8"
 rmp-serde = "1.3.1"
 async-trait = "0.1.89"
+arc-swap = "1.7"
+http-body = "1.0.1"
+http-body-util = "0.1.3"
+bytes = "1.11.1"
 reqwest = "0.13"
 itertools = "0.14"
 typed-builder = "0.23.2"
 rustls = { version = "0.23", features = ["ring"] }
 rustls-pki-types = "1.14.1"
+cpex-core = { git = "https://github.com/contextforge-org/contextforge-plugins-framework", rev = "5ae3f120eb9af227b4eac1804156cd463bcd4eee" }
 
 [profile.release]
 codegen-units = 1

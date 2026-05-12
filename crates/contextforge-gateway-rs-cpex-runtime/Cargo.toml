@@ -1,0 +1,34 @@
+[package]
+name = "contextforge-gateway-rs-cpex-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+keywords.workspace = true
+
+[dependencies]
+arc-swap = "1.7"
+async-trait.workspace = true
+contextforge-gateway-rs-lib.workspace = true
+cpex-core = { git = "https://github.com/contextforge-org/contextforge-plugins-framework", rev = "5ae3f120eb9af227b4eac1804156cd463bcd4eee" }
+cpex-payload-marker = { git = "ssh://git@github.com/contextforge-gateway-rs/cpex-plugins-rs.git", rev = "4ec5799c75d38a7dd324392c8aa7fa086356db6b" }
+redis.workspace = true
+rmcp.workspace = true
+rmp-serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+contextforge-gateway-rs-lib = { path = "../contextforge-gateway-rs-lib", features = ["test-support"] }
+futures.workspace = true
+http.workspace = true
+jsonwebtoken.workspace = true
+openport = { version = "0.1.1", features = ["rand"] }
+reqwest.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

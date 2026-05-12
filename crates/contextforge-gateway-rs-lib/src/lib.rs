@@ -11,6 +11,7 @@ mod common;
 mod const_values;
 mod gateway;
 mod layers;
+mod runtime_hooks;
 mod transports;
 
 #[cfg(test)]
@@ -20,14 +21,27 @@ mod tests;
 mod tools;
 
 mod user_config_store;
+#[cfg(feature = "test-support")]
+pub use common::{DefaultClaims, UpstreamConnectionMode};
 pub use common::{RedisClient, RedisConfig};
+#[cfg(feature = "test-support")]
+pub use contextforge_gateway_rs_apis::{
+    User,
+    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
+};
 use gateway::McpService;
 use layers::session_id::SessionId;
 use tower_http::cors::{Any, CorsLayer};
 use transports::{DownstreamTls, Tcp};
 use typed_builder::TypedBuilder;
+pub use user_config_store::RedisUserConfigStore;
+#[cfg(feature = "test-support")]
+pub use user_config_store::{ConfigStoreError, UserConfigStore};
 
 pub use crate::common::{Config, LogRotation};
+pub use crate::runtime_hooks::{
+    GatewayToolRuntime, RuntimeHookError, RuntimeHookState, ToolArgumentsUpdate, ToolPreCallResult,
+};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type Result<T> = std::result::Result<T, Error>;
@@ -39,7 +53,7 @@ use crate::{
         claims_id::claims_layer, session_id::SessionIdLayer, user_config_store::user_config_store_layer,
         virtual_host_id::virtual_host_id_layer,
     },
-    user_config_store::{RedisUserConfigStore, UserConfigStore},
+    user_config_store::UserConfigStore,
 };
 
 #[derive(Clone)]
@@ -54,6 +68,8 @@ pub struct Gateway {
     config: Config,
     session_manager: Arc<LocalSessionManager>,
     user_config_store_type: UserConfigStoreType,
+    #[builder(default, setter(strip_option))]
+    plugin_runtime: Option<Arc<dyn GatewayToolRuntime>>,
 }
 
 impl Gateway {
@@ -66,8 +82,14 @@ impl Gateway {
             UserConfigStoreType::Test(store) => store,
         };
         let user_config_store = user_config_store as Arc<dyn UserConfigStore + Send + Sync>;
+        let runtime_plugins_enabled = config.runtime_plugins_enabled.unwrap_or(false);
 
         let user_session_store = LocalUserSessionStore::new();
+        let plugin_runtime = self.plugin_runtime;
+        if runtime_plugins_enabled && let Some(plugin_runtime) = &plugin_runtime {
+            plugin_runtime.initialize().await?;
+        }
+        let mcp_plugin_runtime = if runtime_plugins_enabled { plugin_runtime } else { None };
 
         let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
 
@@ -80,6 +102,7 @@ impl Gateway {
                     Ok(McpService::builder()
                         .with_user_session_store(user_session_store.clone())
                         .with_http_client(reqwest_backend_client.clone())
+                        .with_plugin_runtime(mcp_plugin_runtime.clone())
                         .build())
                 },
                 session_manager,

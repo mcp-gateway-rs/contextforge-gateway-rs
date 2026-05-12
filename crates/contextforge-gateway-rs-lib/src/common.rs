@@ -32,6 +32,10 @@ pub struct JwtTokenDecoders {
 pub struct ContextForgeGatewayAppState {
     pub(crate) jwt_token_decoding_keys: JwtTokenDecoders,
     pub(crate) config_store: Arc<dyn UserConfigStore + Send + Sync>,
+    #[cfg_attr(
+        not(feature = "with_tools"),
+        expect(dead_code, reason = "runtime tools read config behind feature flag")
+    )]
     pub(crate) config: Config,
 }
 
@@ -180,6 +184,9 @@ pub struct Config {
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_SINGLE_RUNTIME")]
     pub single_runtime: Option<bool>,
+
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_RUNTIME_PLUGINS_ENABLED")]
+    pub runtime_plugins_enabled: Option<bool>,
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TLS_ADDRESS")]
     pub tls_address: Option<SocketAddr>,
