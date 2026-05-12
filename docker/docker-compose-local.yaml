@@ -105,8 +105,24 @@ services:
       - "300"
       - "--maxclients"
       - "10000"
+      - "--port"
+      - "6379"
+      - "--tls-port"
+      - "16379"
+      - "--tls-cert-file"
+      - "/tls_config/contextforge-server.cert.pem"
+      - "--tls-key-file"
+      - "/tls_config/contextforge-server.key.pem"
+      - "--tls-auth-clients"
+      - "no"
+      # - "--tls-ca-cert-file"
+      # - "/tls_config/contextforge.intermediate.cert.pem"
     ports:
       - "6379:6379"      # expose only if you want host access
+      - "16379:16379"      # expose only if you want host access
+    volumes: 
+      - ../assets/contextforgeCA/:/tls_config:z
+    
 
     networks: [gateways-net]
     deploy:

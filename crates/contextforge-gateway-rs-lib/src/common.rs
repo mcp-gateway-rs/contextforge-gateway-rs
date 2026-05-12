@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io::Read,
+    io::{Cursor, Read},
     net::SocketAddr,
     path::PathBuf,
     sync::Arc,
@@ -11,7 +11,7 @@ use chrono::{Duration, Utc};
 use clap::{Parser, ValueEnum};
 use http::uri::Authority;
 use openid::{CompactJson, CustomClaims, StandardClaims};
-use redis::{ConnectionAddr, IntoConnectionInfo};
+use redis::{ConnectionAddr, IntoConnectionInfo, RedisError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::Url;
@@ -43,23 +43,51 @@ impl CompactJson for ContextForgeGatewayClaims {}
 pub type RedisClient = redis::Client;
 
 #[derive(Debug, Clone)]
-pub struct RedisConfig {
-    address: String,
-    port: u16,
+pub enum RedisConfig {
+    PlainText { host: String, port: u16 },
+
+    Tls { host: String, port: u16, trust_bundle: Vec<u8> },
+    MTls { host: String, port: u16, trust_bundle: Vec<u8>, client_cert: Vec<u8>, client_key: Vec<u8> },
 }
 
-impl IntoConnectionInfo for RedisConfig {
-    fn into_connection_info(self) -> redis::RedisResult<redis::ConnectionInfo> {
-        ConnectionAddr::Tcp(self.address, self.port).into_connection_info()
+impl TryFrom<RedisConfig> for RedisClient {
+    type Error = RedisError;
+
+    fn try_from(redis_config: RedisConfig) -> Result<Self, Self::Error> {
+        match redis_config {
+            RedisConfig::PlainText { host, port } => {
+                Ok(RedisClient::open(ConnectionAddr::Tcp(host, port).into_connection_info()?)?)
+            },
+            RedisConfig::Tls { host, port, trust_bundle } => RedisClient::build_with_tls(
+                format!("rediss://{host}:{port}"),
+                redis::TlsCertificates { client_tls: None, root_cert: Some(trust_bundle) },
+            ),
+            RedisConfig::MTls { host, port, trust_bundle, client_cert, client_key } => RedisClient::build_with_tls(
+                format!("rediss://{host}:{port}"),
+                redis::TlsCertificates {
+                    client_tls: Some(redis::ClientTlsConfig { client_cert, client_key }),
+                    root_cert: Some(trust_bundle),
+                },
+            ),
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum UpstreamConnectionMode {
-    PlainTextAndTls,
-    PlainTextAndMTls,
+    PlainTextOrTls,
+    PlainTextOrMTls,
     TlsOnly,
     MtlsOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(Default)]
+pub enum RedisConnectionMode {
+    PlainText,
+    #[default]
+    Tls,
+    Mtls,
 }
 
 #[derive(Debug, Clone, Parser, Default)]
@@ -68,10 +96,6 @@ pub enum UpstreamConnectionMode {
 pub struct Config {
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_ADDRESS")]
     pub address: Option<SocketAddr>,
-    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME")]
-    pub redis_address: String,
-    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_PORT")]
-    pub redis_port: u16,
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PUBLIC_KEY")]
     pub token_verification_public_key: PathBuf,
@@ -109,6 +133,23 @@ pub struct Config {
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TLS_UPSTREAM_TRUST_BUNDLE")]
     pub upstream_trust_bundle: Option<PathBuf>,
+
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_HOSTNAME")]
+    pub redis_address: String,
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_PORT")]
+    pub redis_port: u16,
+
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_CONNECTION_MODE")]
+    pub redis_mode: RedisConnectionMode,
+
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_TLS_REDIS_TRUST_BUNDLE")]
+    pub redis_tls_trust_bundle: Option<PathBuf>,
+
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_TLS_REDIS_CLIENT_PRIVATE_KEY")]
+    pub redis_tls_client_private_key: Option<PathBuf>,
+
+    #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_REDIS_TLS_REDIS_CLIENT_CERTIFICATE")]
+    pub redis_tls_client_certificate: Option<PathBuf>,
 }
 
 #[derive(Error, Debug)]
@@ -122,10 +163,100 @@ impl TryFrom<&Config> for RedisConfig {
         let _: Authority = format!("{}:{}", value.redis_address, value.redis_port)
             .parse::<Authority>()
             .map_err(|e| ConfigValidationError::RedisConfigurationError(e.to_string()))?;
-        Ok(Self { address: value.redis_address.clone(), port: value.redis_port })
+
+        match value.redis_mode {
+            RedisConnectionMode::PlainText => {
+                Ok(Self::PlainText { host: value.redis_address.clone(), port: value.redis_port })
+            },
+            RedisConnectionMode::Tls => {
+                let Some(trust_bundle) = &value.redis_tls_trust_bundle else {
+                    return Err(ConfigValidationError::RedisConfigurationError(format!(
+                        "Trust bundle is required for Redis {:?}",
+                        value.redis_mode
+                    )));
+                };
+
+                let trust_bundle = validate_certs(trust_bundle)?;
+
+                Ok(Self::Tls { host: value.redis_address.clone(), port: value.redis_port, trust_bundle })
+            },
+            RedisConnectionMode::Mtls => {
+                let Some(trust_bundle) = &value.redis_tls_trust_bundle else {
+                    return Err(ConfigValidationError::RedisConfigurationError(format!(
+                        "Trust bundle is required for Redis {:?}",
+                        value.redis_mode
+                    )));
+                };
+
+                let trust_bundle = validate_certs(trust_bundle)?;
+
+                let Some(certificate) = &value.redis_tls_client_certificate else {
+                    return Err(ConfigValidationError::RedisConfigurationError(format!(
+                        "Client certificate is required for Redis {:?}",
+                        value.redis_mode
+                    )));
+                };
+
+                let client_cert = validate_certs(certificate)?;
+
+                let Some(key) = &value.redis_tls_client_private_key else {
+                    return Err(ConfigValidationError::RedisConfigurationError(format!(
+                        "Client key is required for Redis {:?}",
+                        value.redis_mode
+                    )));
+                };
+
+                let client_key = validate_key(key)?;
+
+                Ok(Self::MTls {
+                    host: value.redis_address.clone(),
+                    port: value.redis_port,
+                    trust_bundle,
+                    client_cert,
+                    client_key,
+                })
+            },
+        }
     }
 
     type Error = ConfigValidationError;
+}
+
+fn validate_certs(path: &PathBuf) -> Result<Vec<u8>, ConfigValidationError> {
+    let mut buf = Vec::new();
+    File::open(path)
+        .map_err(|e| ConfigValidationError::RedisConfigurationError(e.to_string()))?
+        .read_to_end(&mut buf)
+        .map_err(|e| ConfigValidationError::RedisConfigurationError(e.to_string()))?;
+    let mut cursor = Cursor::new(buf);
+
+    let mut count = 0;
+    for cert in rustls_pemfile::certs(&mut cursor) {
+        if let Err(e) = cert {
+            return Err(ConfigValidationError::RedisConfigurationError(e.to_string()));
+        }
+        count += 1;
+    }
+    if count == 0 {
+        Err(ConfigValidationError::RedisConfigurationError("No certificates provided".to_owned()))
+    } else {
+        Ok(cursor.into_inner())
+    }
+}
+
+fn validate_key(path: &PathBuf) -> Result<Vec<u8>, ConfigValidationError> {
+    let mut buf = Vec::new();
+    File::open(path)
+        .map_err(|e| ConfigValidationError::RedisConfigurationError(e.to_string()))?
+        .read_to_end(&mut buf)
+        .map_err(|e| ConfigValidationError::RedisConfigurationError(e.to_string()))?;
+    let mut cursor = Cursor::new(buf);
+
+    if let Ok(Some(_)) = rustls_pemfile::private_key(&mut cursor) {
+        Ok(cursor.into_inner())
+    } else {
+        Err(ConfigValidationError::RedisConfigurationError("Private key is wrong".to_owned()))
+    }
 }
 
 impl TryFrom<&Config> for reqwest::Client {
@@ -135,8 +266,8 @@ impl TryFrom<&Config> for reqwest::Client {
         let builder = reqwest::Client::builder();
         let builder = match config.upstream_connection_mode.as_ref() {
             None | Some(UpstreamConnectionMode::TlsOnly) => builder.https_only(true),
-            Some(UpstreamConnectionMode::PlainTextAndTls) => builder.https_only(false),
-            Some(UpstreamConnectionMode::PlainTextAndMTls) => {
+            Some(UpstreamConnectionMode::PlainTextOrTls) => builder.https_only(false),
+            Some(UpstreamConnectionMode::PlainTextOrMTls) => {
                 builder.https_only(false).identity(extract_identity(config)?)
             },
             Some(UpstreamConnectionMode::MtlsOnly) => builder.https_only(true).identity(extract_identity(config)?),

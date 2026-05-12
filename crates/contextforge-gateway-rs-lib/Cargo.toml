@@ -46,8 +46,11 @@ hyper-util = "0.1.20"
 hyper = { version = "1.4.0" }
 rustls.workspace = true
 rustls-pki-types = { version = "1.14.1", features = ["std"] }
+rustls-pemfile = "2.2.0"
 tokio-rustls = "0.26.4"
 typed-builder.workspace = true
+
+
 [features]
 default = []
 with_tools = []

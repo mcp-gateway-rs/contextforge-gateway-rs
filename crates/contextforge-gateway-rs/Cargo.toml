@@ -9,7 +9,6 @@ keywords.workspace = true
 
 [dependencies]
 contextforge-gateway-rs-lib.workspace = true
-anyhow.workspace = true
 clap.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

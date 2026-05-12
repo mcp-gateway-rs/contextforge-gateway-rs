@@ -136,3 +136,8 @@ impl Gateway {
         Ok(())
     }
 }
+
+pub fn get_config_store(config: &Config) -> Result<RedisUserConfigStore> {
+    let redis_config = RedisConfig::try_from(config)?;
+    Ok(RedisUserConfigStore::new(RedisClient::try_from(redis_config)?))
+}
