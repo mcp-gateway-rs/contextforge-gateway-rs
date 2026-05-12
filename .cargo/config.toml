@@ -5,3 +5,6 @@ jobs = 4
 timeout = 10                # timeout for each HTTP request, in seconds
 low-speed-limit = 1000        # network timeout threshold (bytes/sec)
 multiplexing = true         # HTTP/2 multiplexing
+
+[net]
+git-fetch-with-cli = true

@@ -2,6 +2,7 @@
 members = [
     "crates/contextforge-gateway-rs",
     "crates/contextforge-gateway-rs-apis",
+    "crates/contextforge-gateway-rs-cpex-runtime",
     "crates/contextforge-gateway-rs-lib",
     "crates/contextforge-load-test",
 ]
@@ -20,6 +21,7 @@ repository = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 
 [workspace.dependencies]
 contextforge-gateway-rs = { path = "./crates/contextforge-gateway-rs" }
+contextforge-gateway-rs-cpex-runtime = { path = "./crates/contextforge-gateway-rs-cpex-runtime" }
 contextforge-gateway-rs-lib = { path = "./crates/contextforge-gateway-rs-lib", features = [
     "with_tools",
 ] }
@@ -70,6 +72,8 @@ reqwest = "0.13"
 itertools = "0.14"
 typed-builder = "0.23.2"
 rustls = "0.23"
+# DO NOT MERGE: replace git revision with a released tag before merging.
+cpex-core = { git = "https://github.com/contextforge-org/contextforge-plugins-framework", rev = "5ae3f120eb9af227b4eac1804156cd463bcd4eee" }
 
 [profile.release]
 codegen-units = 1

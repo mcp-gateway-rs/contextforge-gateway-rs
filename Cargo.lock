@@ -33,6 +33,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -623,7 +629,9 @@ checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 name = "contextforge-gateway-rs"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
+ "contextforge-gateway-rs-cpex-runtime",
  "contextforge-gateway-rs-lib",
  "futures",
  "num_cpus",
@@ -649,6 +657,30 @@ dependencies = [
  "serde",
  "serde_json",
  "url",
+]
+
+[[package]]
+name = "contextforge-gateway-rs-cpex-runtime"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "axum",
+ "contextforge-gateway-rs-lib",
+ "cpex-core",
+ "cpex-payload-marker",
+ "futures",
+ "http",
+ "jsonwebtoken",
+ "openport",
+ "redis",
+ "reqwest 0.13.3",
+ "rmcp",
+ "rmp-serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -769,6 +801,45 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "cpex-core"
+version = "0.1.0"
+source = "git+https://github.com/contextforge-org/contextforge-plugins-framework?rev=5ae3f120eb9af227b4eac1804156cd463bcd4eee#5ae3f120eb9af227b4eac1804156cd463bcd4eee"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "futures",
+ "hashbrown 0.15.5",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "wildmatch",
+]
+
+[[package]]
+name = "cpex-payload-marker"
+version = "0.1.0"
+source = "git+ssh://git@github.com/contextforge-gateway-rs/cpex-plugins-rs.git?rev=4ec5799c75d38a7dd324392c8aa7fa086356db6b#4ec5799c75d38a7dd324392c8aa7fa086356db6b"
+dependencies = [
+ "cpex-sdk",
+]
+
+[[package]]
+name = "cpex-sdk"
+version = "0.1.0"
+source = "git+https://github.com/contextforge-org/contextforge-plugins-framework?rev=5ae3f120eb9af227b4eac1804156cd463bcd4eee#5ae3f120eb9af227b4eac1804156cd463bcd4eee"
+dependencies = [
+ "async-trait",
+ "cpex-core",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "cpufeatures"
@@ -1567,6 +1638,8 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash",
 ]
 
@@ -3595,6 +3668,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4128,6 +4214,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]
@@ -4420,6 +4507,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
+
+[[package]]
 name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4464,6 +4557,7 @@ checksum = "ddd74a9687298c6858e9b88ec8935ec45d22e8fd5e6394fa1bd4e99a87789c76"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 
@@ -4697,6 +4791,12 @@ checksum = "52f5ee44c96cf55f1b349600768e3ece3a8f26010c05265ab73f945bb1a2eb9d"
 dependencies = [
  "rustls-pki-types",
 ]
+
+[[package]]
+name = "wildmatch"
+version = "2.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29333c3ea1ba8b17211763463ff24ee84e41c78224c16b001cd907e663a38c68"
 
 [[package]]
 name = "winapi-util"
