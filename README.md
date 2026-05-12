@@ -9,7 +9,7 @@ docker compose -f docker/docker-compose-local.yaml up -d
 
 2. Run gateway
 ```bash 
-    cargo run --release --bin contextforge-gateway-rs -- --address 0.0.0.0:8001 --redis-port 6379 --redis-address 127.0.0.1 --token-verification-public-key assets/jwt.key.pub  --token-verification-private-key assets/jwt.key --number-of-cpus 16
+    cargo run --bin contextforge-gateway-rs -- --address 0.0.0.0:8001 --redis-port 6379 --redis-address 127.0.0.1 --token-verification-public-key assets/jwt.key.pub  --token-verification-private-key assets/jwt.key --number-of-cpus 16 --redis-mode=plain-text --upstream-connection-mode=plain-text-or-tls
 ```
 
 This should spin up Redis instance and two mcp-gateways: a simple counter and a conformance test server from mcp-rust-sdk
