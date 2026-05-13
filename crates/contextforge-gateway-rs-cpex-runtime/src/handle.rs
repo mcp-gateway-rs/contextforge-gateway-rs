@@ -53,10 +53,14 @@ impl CpexRuntimeRegistry {
         Self { config_store: Some(config_store), ..Self::default() }
     }
 
-    pub fn register_factory(&mut self, kind: impl Into<String>, factory: Box<dyn PluginFactory>) {
-        Arc::get_mut(&mut self.factories)
-            .expect("runtime plugin factories must be registered before the registry is shared")
-            .register(kind, factory);
+    pub fn register_factory(
+        &mut self,
+        kind: impl Into<String>,
+        factory: Box<dyn PluginFactory>,
+    ) -> Result<(), GatewayPluginRuntimeError> {
+        let factories = Arc::get_mut(&mut self.factories).ok_or(GatewayPluginRuntimeError::FactoryRegistryShared)?;
+        factories.register(kind, factory);
+        Ok(())
     }
 
     pub async fn reload(&self) -> Result<(), GatewayPluginRuntimeError> {

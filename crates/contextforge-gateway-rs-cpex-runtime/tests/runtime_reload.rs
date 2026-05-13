@@ -23,7 +23,9 @@ async fn runtime_reload_replaces_current_plugin_runtime() {
         }
     }));
     let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store.clone()));
-    runtime.register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)));
+    runtime
+        .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
+        .expect("test factory registers");
 
     GatewayToolRuntime::initialize(&runtime).await.expect("runtime initializes");
     let result = runtime.before_tool_call(&sum_request("sum", 1, 2), "sum").await.expect("pre hook runs");
@@ -60,7 +62,9 @@ async fn initialized_runtime_picks_up_config_store_changes() {
         "cpex": { "plugins": [] }
     }));
     let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store.clone()));
-    runtime.register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)));
+    runtime
+        .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
+        .expect("test factory registers");
 
     GatewayToolRuntime::initialize(&runtime).await.expect("runtime initializes");
     config_store
@@ -104,7 +108,9 @@ async fn runtime_reload_without_config_clears_current_plugin_runtime() {
         }
     }));
     let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store.clone()));
-    runtime.register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)));
+    runtime
+        .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
+        .expect("test factory registers");
 
     GatewayToolRuntime::initialize(&runtime).await.expect("runtime initializes");
     let result = runtime.before_tool_call(&sum_request("sum", 1, 2), "sum").await.expect("pre hook runs");

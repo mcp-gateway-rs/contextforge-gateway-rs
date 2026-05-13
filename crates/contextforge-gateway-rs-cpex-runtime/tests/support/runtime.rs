@@ -35,7 +35,9 @@ pub(crate) fn runtime_with_plugins(plugins: &[Arc<TestPlugin>]) -> Arc<CpexRunti
     }));
     let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store));
     for (index, plugin) in plugins.iter().enumerate() {
-        runtime.register_factory(format!("test-{index}"), Box::new(TestPluginFactory::from_plugin(plugin)));
+        runtime
+            .register_factory(format!("test-{index}"), Box::new(TestPluginFactory::from_plugin(plugin)))
+            .expect("test factory registers");
     }
     Arc::new(runtime)
 }

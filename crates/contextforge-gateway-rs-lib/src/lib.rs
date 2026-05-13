@@ -52,7 +52,8 @@ use crate::{
 pub struct Gateway {
     config: Config,
     session_manager: Arc<LocalSessionManager>,
-    user_config_store: Arc<dyn UserConfigStore + std::marker::Send + Sync>,
+    #[builder(default, setter(strip_option))]
+    user_config_store: Option<Arc<dyn UserConfigStore + std::marker::Send + Sync>>,
     #[builder(default, setter(strip_option))]
     plugin_runtime: Option<Arc<dyn GatewayToolRuntime>>,
 }
@@ -61,7 +62,10 @@ impl Gateway {
     pub async fn run_gateway(self) -> Result<()> {
         let config = &self.config;
         let session_manager = self.session_manager;
-        let user_config_store = self.user_config_store;
+        let user_config_store = match self.user_config_store {
+            Some(store) => store,
+            None => Arc::new(get_config_store(config).await?),
+        };
         let runtime_plugins_enabled = config.runtime_plugins_enabled.unwrap_or(false);
 
         let user_session_store = LocalUserSessionStore::new();
@@ -147,7 +151,7 @@ impl Gateway {
     }
 }
 
-pub fn get_config_store(config: &Config) -> Result<RedisUserConfigStore> {
+pub async fn get_config_store(config: &Config) -> Result<RedisUserConfigStore> {
     let redis_config = RedisConfig::try_from(config)?;
-    Ok(RedisUserConfigStore::new(RedisClient::try_from(redis_config)?))
+    RedisUserConfigStore::new(&RedisClient::try_from(redis_config)?).await
 }

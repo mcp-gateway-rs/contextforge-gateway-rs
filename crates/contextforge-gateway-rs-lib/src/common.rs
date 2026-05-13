@@ -32,7 +32,6 @@ pub struct JwtTokenDecoders {
 pub struct ContextForgeGatewayAppState {
     pub(crate) jwt_token_decoding_keys: JwtTokenDecoders,
     pub(crate) config_store: Arc<dyn UserConfigStore + Send + Sync>,
-    #[allow(dead_code, reason = "admin tool routes read config when compiled")]
     pub(crate) config: Config,
 }
 

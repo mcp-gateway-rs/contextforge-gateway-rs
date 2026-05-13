@@ -285,7 +285,6 @@ where
         let post_state = pre_result.state;
         let mut routed_request = request.clone();
         pre_result.arguments.apply_to_request(&mut routed_request, tool_name);
-        let mut routed_request = Some(routed_request);
 
         let backend_transports = session_manager.borrow_transports().await;
         info!("Borrowed transports {session_id:?} {backend_transports:?}");
@@ -299,7 +298,7 @@ where
 
                 );
                 (service_holder.name == backend_name).then(|| {
-                    let request = routed_request.take().expect("routed request is used once");
+                    let request = routed_request.clone();
                     async move {
                             if let Some(service) = service_holder.running_service {
 //                                let service = service.read().await;

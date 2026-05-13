@@ -74,7 +74,9 @@ async fn runtime_config_loads_registered_factory_plugin() {
         }
     }));
     let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store));
-    runtime.register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)));
+    runtime
+        .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
+        .expect("test factory registers");
 
     GatewayToolRuntime::initialize(&runtime).await.expect("runtime initializes");
     let result = runtime.before_tool_call(&sum_request("sum", 1, 2), "sum").await.expect("pre hook runs");
@@ -102,7 +104,9 @@ async fn runtime_config_loads_generic_cmf_factory_plugin() {
         }
     }));
     let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store));
-    runtime.register_factory("generic", Box::new(CmfPluginFactory::new(TestPlugin::rewrite_from_config)));
+    runtime
+        .register_factory("generic", Box::new(CmfPluginFactory::new(TestPlugin::rewrite_from_config)))
+        .expect("test factory registers");
 
     GatewayToolRuntime::initialize(&runtime).await.expect("runtime initializes");
     let result = runtime.before_tool_call(&sum_request("sum", 1, 2), "sum").await.expect("pre hook runs");
