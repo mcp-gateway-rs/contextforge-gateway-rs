@@ -3,11 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use contextforge_gateway_rs_apis::{User, user_store::UserConfig};
 use lru_time_cache::LruCache;
-use redis::{
-    AsyncCommands, RedisError,
-    aio::{ConnectionManager, ConnectionManagerConfig},
-    cmd,
-};
+use redis::{AsyncCommands, RedisError, cmd};
 
 use tokio::sync::Mutex;
 
@@ -19,21 +15,18 @@ use crate::{
 
 #[derive(Clone)]
 pub struct RedisUserConfigStore {
-    connection: ConnectionManager,
+    redis_client: RedisClient,
     cache: Arc<Mutex<LruCache<String, UserConfig>>>,
 }
 impl RedisUserConfigStore {
-    pub async fn new(redis_client: &RedisClient) -> crate::Result<Self> {
-        Ok(Self {
-            connection: redis_client
-                .get_connection_manager_with_config(ConnectionManagerConfig::default())
-                .await
-                .map_err(|_| ConfigStoreError::InvalidConnection)?,
+    pub fn new(redis_client: RedisClient) -> Self {
+        Self {
+            redis_client,
             cache: Arc::new(Mutex::new(LruCache::with_expiry_duration_and_capacity(
                 LRU_CACHE_EXPIRY_DURATION,
                 LRU_CACHE_ENTRIES,
             ))),
-        })
+        }
     }
 }
 
@@ -52,7 +45,9 @@ impl UserConfigStore for RedisUserConfigStore {
                 return Err(ConfigStoreError::DataEncoding);
             };
 
-            let mut connection = self.connection.clone();
+            let Ok(mut connection) = self.redis_client.get_multiplexed_async_connection().await else {
+                return Err(ConfigStoreError::InvalidConnection);
+            };
             let maybe_user_config: Result<Option<Vec<u8>>, RedisError> =
                 cmd("GET").arg(key).take().query_async(&mut connection).await;
 
@@ -78,7 +73,9 @@ impl UserConfigStore for RedisUserConfigStore {
             return Err(ConfigStoreError::DataEncoding);
         };
 
-        let mut connection = self.connection.clone();
+        let Ok(mut connection) = self.redis_client.get_multiplexed_async_connection().await else {
+            return Err(ConfigStoreError::InvalidConnection);
+        };
 
         if connection.set::<&[u8], &[u8], String>(&key, &encoded).await.is_ok() {
             self.cache.lock().await.insert(user_key.key().to_owned(), config.clone());

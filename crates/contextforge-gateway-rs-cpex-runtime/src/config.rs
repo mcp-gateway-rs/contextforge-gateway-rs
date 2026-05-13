@@ -48,9 +48,18 @@ impl RuntimePluginConfigStore for RedisRuntimePluginConfigStore {
             return Ok(None);
         };
 
-        let document = rmp_serde::decode::from_slice::<serde_json::Value>(&config)
-            .or_else(|_| serde_json::from_slice::<serde_json::Value>(&config))
-            .map_err(|_| GatewayPluginRuntimeError::ConfigWrongFormat)?;
+        let document = decode_config_document(&config)?;
         Ok(Some(document))
     }
+}
+
+fn decode_config_document(config: &[u8]) -> Result<serde_json::Value, GatewayPluginRuntimeError> {
+    if config.iter().copied().find(|byte| !byte.is_ascii_whitespace()).is_some_and(|byte| matches!(byte, b'{' | b'[')) {
+        return serde_json::from_slice::<serde_json::Value>(config)
+            .map_err(|_| GatewayPluginRuntimeError::ConfigWrongFormat);
+    }
+
+    rmp_serde::decode::from_slice::<serde_json::Value>(config)
+        .or_else(|_| serde_json::from_slice::<serde_json::Value>(config))
+        .map_err(|_| GatewayPluginRuntimeError::ConfigWrongFormat)
 }

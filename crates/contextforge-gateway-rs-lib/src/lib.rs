@@ -150,7 +150,7 @@ impl Gateway {
     }
 }
 
-pub async fn get_config_store(config: &Config) -> Result<RedisUserConfigStore> {
+pub fn get_config_store(config: &Config) -> Result<RedisUserConfigStore> {
     let redis_config = RedisConfig::try_from(config)?;
-    RedisUserConfigStore::new(&RedisClient::try_from(redis_config)?).await
+    Ok(RedisUserConfigStore::new(RedisClient::try_from(redis_config)?))
 }

@@ -11,6 +11,9 @@ keywords.workspace = true
 anyhow.workspace = true
 contextforge-gateway-rs-cpex-runtime.workspace = true
 contextforge-gateway-rs-lib.workspace = true
+cpex-payload-marker = { git = "ssh://git@github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "07af215bc9f00a6c3cd6d4838479518569607581", optional = true }
+cpex-text-prefixer = { git = "ssh://git@github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "07af215bc9f00a6c3cd6d4838479518569607581", optional = true }
+cpex-tool-namespace = { git = "ssh://git@github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "07af215bc9f00a6c3cd6d4838479518569607581", optional = true }
 clap.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -26,6 +29,9 @@ rmcp.workspace = true
 tikv-jemallocator = "0.6.1"
 futures.workspace = true
 rustls.workspace = true
+
+[features]
+test-plugins = ["dep:cpex-payload-marker", "dep:cpex-text-prefixer", "dep:cpex-tool-namespace"]
 
 [lints]
 workspace = true
