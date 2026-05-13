@@ -10,7 +10,7 @@ name = "webpki-roots"
 ## This doesn't work at the moment. see https://github.com/EmbarkStudios/cargo-deny/issues/859
 [[licenses.exceptions]]
 allow = ["CDLA-Permissive-2.0"]
-name = "webpki-roots-certs"
+name = "webpki-root-certs"
 
 
 [licenses]

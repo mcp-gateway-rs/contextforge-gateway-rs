@@ -34,6 +34,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
+  cargo-deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2.75.27
+        with:
+          tool: cargo-deny
+      - run: cargo deny check advisories licenses
+
   test:
     runs-on: ubuntu-latest
     steps:
