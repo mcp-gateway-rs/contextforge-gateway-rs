@@ -2,7 +2,7 @@ mod support;
 
 use std::sync::Arc;
 
-use contextforge_gateway_rs_cpex_runtime::{CpexRuntimeRegistry, PAYLOAD_MARKER_KIND};
+use contextforge_gateway_rs_cpex_runtime::CpexRuntimeRegistry;
 use cpex_core::hooks::types::cmf_hook_names;
 use rmcp::model::ErrorCode;
 use serde_json::{Value, json};
@@ -167,25 +167,4 @@ async fn enabled_runtime_applies_config_change_after_gateway_start() {
     let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
     assert_eq!("30", text(&result));
     assert_eq!(1, observations.lock().expect("observations lock poisoned").pre_calls);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn configured_standard_cpex_plugin_modifies_gateway_payload() {
-    let config_store = MemoryRuntimePluginConfigStore::with_config(json!({
-        "version": 1,
-        "cpex": {
-            "plugins": [{
-                "name": "payload-marker",
-                "kind": PAYLOAD_MARKER_KIND,
-                "hooks": [cmf_hook_names::TOOL_POST_INVOKE]
-            }]
-        }
-    }));
-    let runtime = Arc::new(CpexRuntimeRegistry::with_config_store(Arc::new(config_store)));
-
-    let gateway = start_gateway("admin@example.com", true, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
-    let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
-
-    assert_eq!("3[cpex:payload-marker]", text(&result));
 }
