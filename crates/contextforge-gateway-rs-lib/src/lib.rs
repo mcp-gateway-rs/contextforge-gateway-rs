@@ -53,13 +53,13 @@ use crate::{
         claims_id::claims_layer, session_id::SessionIdLayer, user_config_store::user_config_store_layer,
         virtual_host_id::virtual_host_id_layer,
     },
-    user_config_store::UserConfigStore,
+    user_config_store::UserConfigStore as GatewayUserConfigStore,
 };
 
 #[derive(Clone)]
 pub enum UserConfigStoreType {
     Redis,
-    Test(Arc<dyn UserConfigStore + std::marker::Send + Sync>),
+    Test(Arc<dyn GatewayUserConfigStore + std::marker::Send + Sync>),
 }
 
 #[derive(Clone, TypedBuilder)]
@@ -81,7 +81,7 @@ impl Gateway {
             UserConfigStoreType::Redis => Arc::new(get_config_store(config).await?),
             UserConfigStoreType::Test(store) => store,
         };
-        let user_config_store = user_config_store as Arc<dyn UserConfigStore + Send + Sync>;
+        let user_config_store = user_config_store as Arc<dyn GatewayUserConfigStore + Send + Sync>;
         let runtime_plugins_enabled = config.runtime_plugins_enabled.unwrap_or(false);
 
         let user_session_store = LocalUserSessionStore::new();

@@ -5,9 +5,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use contextforge_gateway_rs_cpex_runtime::CpexRuntimeRegistry;
-use contextforge_gateway_rs_lib::{
-    Config, Gateway, GatewayToolRuntime, RedisClient, RedisConfig, UserConfigStoreType,
-};
+use contextforge_gateway_rs_lib::{Config, Gateway, GatewayToolRuntime, RedisClient, RedisConfig, UserConfigStoreType};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rustls::crypto;
 use tikv_jemallocator::Jemalloc;
