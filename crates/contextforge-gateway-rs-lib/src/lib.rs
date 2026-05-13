@@ -47,21 +47,14 @@ use crate::{
         claims_id::claims_layer, session_id::SessionIdLayer, user_config_store::user_config_store_layer,
         virtual_host_id::virtual_host_id_layer,
     },
-    user_config_store::UserConfigStore as GatewayUserConfigStore,
 };
-
-#[derive(Clone)]
-pub enum UserConfigStoreType {
-    Redis,
-    Test(Arc<dyn GatewayUserConfigStore + std::marker::Send + Sync>),
-}
 
 #[derive(Clone, TypedBuilder)]
 #[builder(field_defaults(setter(prefix = "with_")))]
 pub struct Gateway {
     config: Config,
     session_manager: Arc<LocalSessionManager>,
-    user_config_store_type: UserConfigStoreType,
+    user_config_store: Arc<dyn UserConfigStore + std::marker::Send + Sync>,
     #[builder(default, setter(strip_option))]
     plugin_runtime: Option<Arc<dyn GatewayToolRuntime>>,
 }
@@ -70,12 +63,7 @@ impl Gateway {
     pub async fn run_gateway(self) -> Result<()> {
         let config = &self.config;
         let session_manager = self.session_manager;
-
-        let user_config_store = match self.user_config_store_type {
-            UserConfigStoreType::Redis => Arc::new(get_config_store(config).await?),
-            UserConfigStoreType::Test(store) => store,
-        };
-        let user_config_store = user_config_store as Arc<dyn GatewayUserConfigStore + Send + Sync>;
+        let user_config_store = self.user_config_store;
         let runtime_plugins_enabled = config.runtime_plugins_enabled.unwrap_or(false);
 
         let user_session_store = LocalUserSessionStore::new();

@@ -161,9 +161,8 @@ async fn create_gateway_with_four_counters(user: &str, config: Config) -> crate:
 
     let gateway = Gateway::builder()
         .with_config(config.clone())
-        //.with_user_config_store(Arc::new(mocked_user_config_store))
+        .with_user_config_store(Arc::new(mocked_user_config_store))
         .with_session_manager(Arc::new(LocalSessionManager::default()))
-        .with_user_config_store_type(crate::UserConfigStoreType::Test(Arc::new(mocked_user_config_store)))
         .build();
 
     let gateway = async move {
@@ -229,9 +228,8 @@ async fn create_tls_gateway_with_four_tls_counters(user: &str, config: Config) -
 
     let gateway = Gateway::builder()
         .with_config(config.clone())
-        //.with_user_config_store(Arc::new(mocked_user_config_store))
+        .with_user_config_store(Arc::new(mocked_user_config_store))
         .with_session_manager(Arc::new(LocalSessionManager::default()))
-        .with_user_config_store_type(crate::UserConfigStoreType::Test(Arc::new(mocked_user_config_store)))
         .build();
 
     let gateway = async move {
