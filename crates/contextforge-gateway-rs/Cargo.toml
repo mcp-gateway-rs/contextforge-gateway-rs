@@ -11,9 +11,9 @@ keywords.workspace = true
 anyhow.workspace = true
 contextforge-gateway-rs-cpex-runtime.workspace = true
 contextforge-gateway-rs-lib.workspace = true
-cpex-payload-marker = { git = "ssh://git@github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "07af215bc9f00a6c3cd6d4838479518569607581", optional = true }
-cpex-text-prefixer = { git = "ssh://git@github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "07af215bc9f00a6c3cd6d4838479518569607581", optional = true }
-cpex-tool-namespace = { git = "ssh://git@github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "07af215bc9f00a6c3cd6d4838479518569607581", optional = true }
+cpex-payload-marker = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "07af215bc9f00a6c3cd6d4838479518569607581", optional = true }
+cpex-text-prefixer = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "07af215bc9f00a6c3cd6d4838479518569607581", optional = true }
+cpex-tool-namespace = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "07af215bc9f00a6c3cd6d4838479518569607581", optional = true }
 clap.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
