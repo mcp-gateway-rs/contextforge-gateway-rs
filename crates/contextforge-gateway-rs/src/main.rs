@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use clap::Parser;
 use contextforge_gateway_rs_cpex_runtime::CpexRuntimeRegistry;
-use contextforge_gateway_rs_lib::{Config, Gateway, GatewayToolRuntime, RedisClient, RedisConfig, UserConfigStoreType};
+use contextforge_gateway_rs_lib::{
+    Config, Gateway, GatewayToolRuntime, RedisClient, RedisConfig, UserConfigStore, get_config_store,
+};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rustls::crypto;
 use tikv_jemallocator::Jemalloc;
@@ -26,9 +28,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let redis_client = RedisClient::try_from(RedisConfig::try_from(&config)?)?;
     let plugin_runtime = Arc::new(CpexRuntimeRegistry::with_redis_config(redis_client));
     let gateway_plugin_runtime: Arc<dyn GatewayToolRuntime> = Arc::<CpexRuntimeRegistry>::clone(&plugin_runtime);
+    let redis_store =
+        tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(get_config_store(&config))?;
+    let user_config_store: Arc<dyn UserConfigStore + Send + Sync> = Arc::new(redis_store);
     let gateway = Gateway::builder()
         .with_config(config)
-        .with_user_config_store_type(UserConfigStoreType::Redis)
+        .with_user_config_store(user_config_store)
         .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_plugin_runtime(gateway_plugin_runtime)
         .build();
