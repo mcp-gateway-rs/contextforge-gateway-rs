@@ -22,21 +22,13 @@ mod tests;
 mod tools;
 
 mod user_config_store;
-#[cfg(feature = "test-support")]
-pub use common::{DefaultClaims, UpstreamConnectionMode};
-pub use common::{RedisClient, RedisConfig};
-#[cfg(feature = "test-support")]
-pub use contextforge_gateway_rs_apis::{
-    User,
-    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
-};
+pub use common::{RedisClient, RedisConfig, UpstreamConnectionMode};
 use gateway::McpService;
 use layers::session_id::SessionId;
 use tower_http::cors::{Any, CorsLayer};
 use transports::{DownstreamTls, Tcp};
 use typed_builder::TypedBuilder;
 pub use user_config_store::RedisUserConfigStore;
-#[cfg(feature = "test-support")]
 pub use user_config_store::{ConfigStoreError, UserConfigStore};
 
 pub use crate::common::{Config, LogRotation};

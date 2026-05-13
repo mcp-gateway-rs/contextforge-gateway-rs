@@ -7,14 +7,17 @@ use std::{
         Arc, Mutex, Mutex as StdMutex,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use async_trait::async_trait;
+use contextforge_gateway_rs_apis::{
+    User,
+    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
+};
 use contextforge_gateway_rs_cpex_runtime::{CpexRuntimeRegistry, GatewayPluginRuntimeError, RuntimePluginConfigStore};
 use contextforge_gateway_rs_lib::{
-    BackendMCPGateway, Config, ConfigStoreError, DefaultClaims, Gateway, UpstreamConnectionMode, User, UserConfig,
-    UserConfigStore, UserConfigStoreType, VirtualHost,
+    Config, ConfigStoreError, Gateway, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType,
 };
 use cpex_core::{
     cmf::{CmfHook, ContentPart, Message, MessagePayload, Role},
@@ -535,7 +538,16 @@ fn token(user_id: &str) -> String {
     let key = EncodingKey::from_rsa_pem(&fs::read("../../assets/jwt.key").expect("jwt key")).expect("encoding key");
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some("test".to_owned());
-    encode::<DefaultClaims>(&header, &DefaultClaims::new(user_id.to_owned()), &key).expect("jwt token")
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("system clock").as_secs();
+    let claims = json!({
+        "iss": "http://contextforge-gateway-rs",
+        "sub": user_id,
+        "aud": "mcp-audience",
+        "exp": now + 3600,
+        "iat": now,
+        "userinfo": { "sub": user_id },
+    });
+    encode(&header, &claims, &key).expect("jwt token")
 }
 
 pub(crate) fn runtime_with_pre(plugin: Arc<TestPlugin>) -> Arc<CpexRuntimeRegistry> {

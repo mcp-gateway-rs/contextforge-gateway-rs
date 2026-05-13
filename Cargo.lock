@@ -666,6 +666,7 @@ dependencies = [
  "arc-swap",
  "async-trait",
  "axum",
+ "contextforge-gateway-rs-apis",
  "contextforge-gateway-rs-lib",
  "cpex-core",
  "futures",

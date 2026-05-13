@@ -21,7 +21,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
-contextforge-gateway-rs-lib = { path = "../contextforge-gateway-rs-lib", features = ["test-support"] }
+contextforge-gateway-rs-apis.workspace = true
 futures.workspace = true
 http.workspace = true
 jsonwebtoken.workspace = true
