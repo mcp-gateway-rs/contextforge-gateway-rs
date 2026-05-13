@@ -54,6 +54,38 @@ async fn runtime_reload_replaces_current_plugin_runtime() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn failed_runtime_reload_keeps_current_plugin_runtime() {
+    let plugin = Arc::new(TestPlugin::new("configured-pre", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_rewrite());
+    let observations = plugin.observations();
+    let config_store = MemoryRuntimePluginConfigStore::with_config(json!({
+        "version": 1,
+        "cpex": {
+            "plugins": [{
+                "name": "configured-pre",
+                "kind": "test",
+                "hooks": [cmf_hook_names::TOOL_PRE_INVOKE]
+            }]
+        }
+    }));
+    let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store.clone()));
+    runtime
+        .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
+        .expect("test factory registers");
+
+    GatewayToolRuntime::initialize(&runtime).await.expect("runtime initializes");
+    let result = runtime.before_tool_call(&sum_request("sum", 1, 2), "sum").await.expect("pre hook runs");
+    assert!(matches!(result.arguments, ToolArgumentsUpdate::Replace(Some(_))));
+
+    config_store.set_config(json!({ "version": 2, "cpex": { "plugins": [] } })).await;
+    runtime.reload().await.expect_err("invalid reload fails");
+
+    let result = runtime.before_tool_call(&sum_request("sum", 1, 2), "sum").await.expect("pre hook still runs");
+    assert!(matches!(result.arguments, ToolArgumentsUpdate::Replace(Some(_))));
+    assert_eq!(2, observations.lock().expect("observations lock poisoned").pre_calls);
+    assert_eq!(0, observations.lock().expect("observations lock poisoned").shutdown_calls);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn initialized_runtime_picks_up_config_store_changes() {
     let plugin = Arc::new(TestPlugin::new("configured-pre", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_rewrite());
     let observations = plugin.observations();

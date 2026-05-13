@@ -60,6 +60,43 @@ async fn routed_runtime_plugin_config_is_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn scoped_runtime_plugin_config_is_rejected() {
+    let config_store = MemoryRuntimePluginConfigStore::with_config(json!({
+        "version": 1,
+        "cpex": {
+            "plugins": [{
+                "name": "scoped",
+                "kind": "test",
+                "hooks": [cmf_hook_names::TOOL_PRE_INVOKE],
+                "conditions": [{ "tools": ["sum"] }]
+            }]
+        }
+    }));
+    let runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store));
+    let error = GatewayToolRuntime::initialize(&runtime).await.expect_err("scoped config is rejected");
+
+    assert_eq!("runtime plugin config is unsupported", error.to_string());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn non_tool_runtime_plugin_hook_is_rejected() {
+    let config_store = MemoryRuntimePluginConfigStore::with_config(json!({
+        "version": 1,
+        "cpex": {
+            "plugins": [{
+                "name": "llm",
+                "kind": "test",
+                "hooks": [cmf_hook_names::LLM_INPUT]
+            }]
+        }
+    }));
+    let runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store));
+    let error = GatewayToolRuntime::initialize(&runtime).await.expect_err("non-tool hook is rejected");
+
+    assert_eq!("runtime plugin config is unsupported", error.to_string());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn runtime_config_loads_registered_factory_plugin() {
     let plugin = Arc::new(TestPlugin::new("configured-pre", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_rewrite());
     let observations = plugin.observations();

@@ -50,12 +50,6 @@ fn cmf_hook_name(hook: &str) -> Option<&'static str> {
     match hook {
         cmf_hook_names::TOOL_PRE_INVOKE => Some(cmf_hook_names::TOOL_PRE_INVOKE),
         cmf_hook_names::TOOL_POST_INVOKE => Some(cmf_hook_names::TOOL_POST_INVOKE),
-        cmf_hook_names::LLM_INPUT => Some(cmf_hook_names::LLM_INPUT),
-        cmf_hook_names::LLM_OUTPUT => Some(cmf_hook_names::LLM_OUTPUT),
-        cmf_hook_names::PROMPT_PRE_FETCH => Some(cmf_hook_names::PROMPT_PRE_FETCH),
-        cmf_hook_names::PROMPT_POST_FETCH => Some(cmf_hook_names::PROMPT_POST_FETCH),
-        cmf_hook_names::RESOURCE_PRE_FETCH => Some(cmf_hook_names::RESOURCE_PRE_FETCH),
-        cmf_hook_names::RESOURCE_POST_FETCH => Some(cmf_hook_names::RESOURCE_POST_FETCH),
         _ => None,
     }
 }

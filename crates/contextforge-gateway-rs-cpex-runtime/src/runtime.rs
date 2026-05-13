@@ -54,13 +54,15 @@ impl GatewayPluginRuntime {
         self.inner.manager.shutdown().await;
     }
 
+    pub(crate) fn has_post_hook(&self) -> bool {
+        self.inner.has_post_hook
+    }
+
     pub(crate) async fn from_config(
         config: CpexConfig,
         factories: &PluginFactoryRegistry,
     ) -> Result<Self, GatewayPluginRuntimeError> {
-        if config.routing_enabled() || !config.routes.is_empty() {
-            return Err(GatewayPluginRuntimeError::ConfigUnsupported);
-        }
+        validate_gateway_supported_config(&config)?;
 
         let has_pre_hook =
             config.plugins.iter().any(|plugin| plugin.hooks.iter().any(|hook| hook == cmf_hook_names::TOOL_PRE_INVOKE));
@@ -74,7 +76,31 @@ impl GatewayPluginRuntime {
         manager.initialize().await.map_err(|source| GatewayPluginRuntimeError::Initialization { source })?;
         Ok(Self { inner: Arc::new(PluginRuntimeInner { manager, has_pre_hook, has_post_hook }) })
     }
+}
 
+fn validate_gateway_supported_config(config: &CpexConfig) -> Result<(), GatewayPluginRuntimeError> {
+    if config.routing_enabled() || !config.routes.is_empty() || !config.plugin_dirs.is_empty() {
+        return Err(GatewayPluginRuntimeError::ConfigUnsupported);
+    }
+
+    for plugin in &config.plugins {
+        if !plugin.conditions.is_empty() {
+            return Err(GatewayPluginRuntimeError::ConfigUnsupported);
+        }
+
+        if plugin
+            .hooks
+            .iter()
+            .any(|hook| hook != cmf_hook_names::TOOL_PRE_INVOKE && hook != cmf_hook_names::TOOL_POST_INVOKE)
+        {
+            return Err(GatewayPluginRuntimeError::ConfigUnsupported);
+        }
+    }
+
+    Ok(())
+}
+
+impl GatewayPluginRuntime {
     async fn invoke_tool_pre(&self, payload: MessagePayload) -> PipelineResult {
         let (result, background_tasks) = self
             .inner
