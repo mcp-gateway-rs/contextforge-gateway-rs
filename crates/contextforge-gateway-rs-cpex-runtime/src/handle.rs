@@ -18,7 +18,6 @@ use rmcp::{
 use crate::{
     config::{RedisRuntimePluginConfigStore, RuntimePluginConfigStore, cpex_config_from_document},
     error::GatewayPluginRuntimeError,
-    factory::{PAYLOAD_MARKER_KIND, PayloadMarkerFactory},
     runtime::GatewayPluginRuntime,
 };
 
@@ -36,12 +35,10 @@ struct RegistryToolCallState {
 
 impl Default for CpexRuntimeRegistry {
     fn default() -> Self {
-        let mut factories = PluginFactoryRegistry::new();
-        factories.register(PAYLOAD_MARKER_KIND, Box::new(PayloadMarkerFactory));
         Self {
             runtime: Arc::new(ArcSwap::from_pointee(GatewayPluginRuntime::default())),
             config_store: None,
-            factories: Arc::new(factories),
+            factories: Arc::new(PluginFactoryRegistry::new()),
             watcher_started: AtomicBool::new(false),
         }
     }
