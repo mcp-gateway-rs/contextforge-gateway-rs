@@ -70,6 +70,16 @@ This integration currently passes only tool payloads. CPEX configs that enable r
 
 This demo uses [`cpex-payload-marker`](https://github.com/contextforge-gateway-rs/cpex-plugins-rs/tree/main/crates/cpex-payload-marker). The plugin must be included in the gateway build and its CPEX factory must be registered before the gateway starts. Redis runtime registration activates already-registered factories; it does not load new Rust code into a running process.
 
+Add the plugin crate to the gateway build:
+
+```bash
+CARGO_NET_GIT_FETCH_WITH_CLI=true cargo add cpex-payload-marker \
+  --package contextforge-gateway-rs \
+  --git ssh://git@github.com/contextforge-gateway-rs/cpex-plugins-rs
+```
+
+Register the plugin factory in the gateway binary before `CpexRuntimeRegistry` is shared. The Redis `kind` value below must match that registered factory name.
+
 Start Redis and the sample MCP backends:
 
 ```bash
