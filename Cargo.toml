@@ -2,7 +2,7 @@
 members = [
     "crates/contextforge-gateway-rs",
     "crates/contextforge-gateway-rs-apis",
-    "crates/contextforge-gateway-rs-cpex-runtime",
+    "crates/contextforge-gateway-rs-cpex",
     "crates/contextforge-gateway-rs-lib",
     "crates/contextforge-load-test",
 ]
@@ -21,7 +21,7 @@ repository = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 
 [workspace.dependencies]
 contextforge-gateway-rs = { path = "./crates/contextforge-gateway-rs" }
-contextforge-gateway-rs-cpex-runtime = { path = "./crates/contextforge-gateway-rs-cpex-runtime" }
+contextforge-gateway-rs-cpex = { path = "./crates/contextforge-gateway-rs-cpex" }
 contextforge-gateway-rs-lib = { path = "./crates/contextforge-gateway-rs-lib", features = [
     "with_tools",
 ] }

@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use async_trait::async_trait;
-use contextforge_gateway_rs_cpex_runtime::{GatewayPluginRuntimeError, RuntimePluginConfigStore};
+use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeError, RuntimePluginConfigStore};
 use serde_json::Value;
 use tokio::sync::Mutex as TokioMutex;
 

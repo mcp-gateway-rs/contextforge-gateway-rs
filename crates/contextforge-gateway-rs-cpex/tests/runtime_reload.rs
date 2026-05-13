@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use contextforge_gateway_rs_cpex_runtime::CpexRuntimeRegistry;
+use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use contextforge_gateway_rs_lib::{GatewayToolRuntime, ToolArgumentsUpdate};
 use cpex_core::hooks::types::cmf_hook_names;
 use serde_json::json;

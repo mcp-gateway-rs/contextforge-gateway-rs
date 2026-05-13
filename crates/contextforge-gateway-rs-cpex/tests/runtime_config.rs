@@ -2,7 +2,7 @@ mod support;
 
 use std::sync::Arc;
 
-use contextforge_gateway_rs_cpex_runtime::{CmfPluginFactory, CpexRuntimeRegistry};
+use contextforge_gateway_rs_cpex::{CmfPluginFactory, CpexRuntimeRegistry};
 use contextforge_gateway_rs_lib::{GatewayToolRuntime, ToolArgumentsUpdate};
 use cpex_core::hooks::types::cmf_hook_names;
 use serde_json::json;

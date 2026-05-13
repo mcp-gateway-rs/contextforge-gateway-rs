@@ -8,7 +8,8 @@ keywords.workspace = true
 
 
 [dependencies]
-contextforge-gateway-rs-cpex-runtime.workspace = true
+anyhow.workspace = true
+contextforge-gateway-rs-cpex.workspace = true
 contextforge-gateway-rs-lib.workspace = true
 cpex-payload-marker = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "07af215bc9f00a6c3cd6d4838479518569607581", optional = true }
 cpex-text-prefixer = { git = "https://github.com/contextforge-gateway-rs/cpex-plugins-rs", rev = "07af215bc9f00a6c3cd6d4838479518569607581", optional = true }

@@ -1,5 +1,5 @@
 [package]
-name = "contextforge-gateway-rs-cpex-runtime"
+name = "contextforge-gateway-rs-cpex"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
