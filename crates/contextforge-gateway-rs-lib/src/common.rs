@@ -24,7 +24,6 @@ use crate::{const_values::CONEXT_FORGE_GATEWAY_AUDIENCE, user_config_store::User
 pub struct ContextForgeGatewayAppState {
     pub(crate) jwt_token_decoder: Arc<dyn JwtDecoder<ContextForgeGatewayClaims> + Send + Sync>,
     pub(crate) config_store: Arc<dyn UserConfigStore + Send + Sync>,
-    #[allow(dead_code, reason = "admin tool routes read config when compiled")]
     pub(crate) config: Config,
 }
 

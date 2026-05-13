@@ -142,7 +142,9 @@ async fn enabled_runtime_applies_config_change_after_gateway_start() {
         "cpex": { "plugins": [] }
     }));
     let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store.clone()));
-    runtime.register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)));
+    runtime
+        .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
+        .expect("test factory registers");
     let runtime = Arc::new(runtime);
     let gateway = start_gateway("admin@example.com", true, Arc::clone(&runtime)).await;
     let service = gateway.connect("admin@example.com").await;

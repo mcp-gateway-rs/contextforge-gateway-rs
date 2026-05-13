@@ -17,7 +17,9 @@ async fn combined_plugin_preserves_context_from_pre_to_post() {
     let observations = plugin.observations();
     let config_store = MemoryRuntimePluginConfigStore::with_config(plugin_config(&[Arc::clone(&plugin)]));
     let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store));
-    runtime.register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)));
+    runtime
+        .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
+        .expect("test factory registers");
     GatewayToolRuntime::initialize(&runtime).await.expect("runtime initializes");
 
     let pre = runtime.before_tool_call(&sum_request("sum", 1, 2), "sum").await.expect("pre hook runs");
@@ -37,7 +39,9 @@ async fn registry_pins_runtime_from_pre_to_post_across_replacement() {
     let observations = plugin.observations();
     let config_store = MemoryRuntimePluginConfigStore::with_config(plugin_config(&[Arc::clone(&plugin)]));
     let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store.clone()));
-    runtime.register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)));
+    runtime
+        .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
+        .expect("test factory registers");
     GatewayToolRuntime::initialize(&runtime).await.expect("runtime initializes");
 
     let pre = runtime.before_tool_call(&sum_request("sum", 1, 2), "sum").await.expect("pre hook runs");
@@ -56,7 +60,9 @@ async fn registry_shutdowns_replaced_runtime_when_unused() {
     let observations = plugin.observations();
     let config_store = MemoryRuntimePluginConfigStore::with_config(plugin_config(&[Arc::clone(&plugin)]));
     let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store.clone()));
-    runtime.register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)));
+    runtime
+        .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
+        .expect("test factory registers");
     GatewayToolRuntime::initialize(&runtime).await.expect("runtime initializes");
 
     config_store.clear_config().await;
