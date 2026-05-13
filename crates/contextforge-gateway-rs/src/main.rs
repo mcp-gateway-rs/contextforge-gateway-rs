@@ -1,5 +1,7 @@
 mod logging;
 mod runtime;
+#[cfg(feature = "test-plugins")]
+mod test_plugins;
 
 use std::sync::Arc;
 
@@ -26,10 +28,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let runtime = runtime::Runtime::from(&config);
 
     let redis_client = RedisClient::try_from(RedisConfig::try_from(&config)?)?;
-    let plugin_runtime = Arc::new(CpexRuntimeRegistry::with_redis_config(redis_client));
+    let plugin_runtime = CpexRuntimeRegistry::with_redis_config(redis_client);
+    #[cfg(feature = "test-plugins")]
+    let plugin_runtime = {
+        let mut plugin_runtime = plugin_runtime;
+        test_plugins::register(&mut plugin_runtime);
+        plugin_runtime
+    };
+    let plugin_runtime = Arc::new(plugin_runtime);
     let gateway_plugin_runtime: Arc<dyn GatewayToolRuntime> = Arc::<CpexRuntimeRegistry>::clone(&plugin_runtime);
-    let redis_store =
-        tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(get_config_store(&config))?;
+    let redis_store = get_config_store(&config)?;
     let user_config_store: Arc<dyn UserConfigStore + Send + Sync> = Arc::new(redis_store);
     let gateway = Gateway::builder()
         .with_config(config)

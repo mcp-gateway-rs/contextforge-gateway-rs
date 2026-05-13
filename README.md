@@ -68,28 +68,30 @@ This integration currently passes only tool payloads. CPEX configs that enable r
 
 ### Payload Marker Demo
 
-This demo uses [`cpex-payload-marker`](https://github.com/contextforge-gateway-rs/cpex-plugins-rs/tree/main/crates/cpex-payload-marker). The plugin must be included in the gateway build and its CPEX factory must be registered before the gateway starts. Redis runtime registration activates already-registered factories; it does not load new Rust code into a running process.
+This demo uses [`cpex-payload-marker`](https://github.com/contextforge-gateway-rs/cpex-plugins-rs/tree/main/crates/cpex-payload-marker). The plugin must be included in the gateway build before the gateway starts. Redis runtime registration activates already-registered factories; it does not load new Rust code into a running process.
 
-Add the plugin crate to the gateway build:
+Build the gateway with the demo plugin factories:
 
 ```bash
-CARGO_NET_GIT_FETCH_WITH_CLI=true cargo add cpex-payload-marker \
-  --package contextforge-gateway-rs \
-  --git ssh://git@github.com/contextforge-gateway-rs/cpex-plugins-rs
+CARGO_NET_GIT_FETCH_WITH_CLI=true cargo check -p contextforge-gateway-rs --features test-plugins
 ```
 
-Register the plugin factory in the gateway binary before `CpexRuntimeRegistry` is shared. The Redis `kind` value below must match that registered factory name.
+The `test-plugins` feature includes those demo plugin crates and registers their factories through the gateway's generic CMF factory adapter.
 
 Start Redis and the sample MCP backends:
 
 ```bash
+GATEWAY_CPU_LIMIT=1 \
+GATEWAY_CPU_RESERVATION=0.5 \
+GATEWAY_MEM_LIMIT=1G \
+GATEWAY_MEM_RESERVATION=512M \
 docker compose -f docker/docker-compose-local.yaml up -d
 ```
 
 Start the gateway with runtime plugins enabled:
 
 ```bash
-cargo run --release --bin contextforge-gateway-rs -- \
+CARGO_NET_GIT_FETCH_WITH_CLI=true cargo run --release --features test-plugins --bin contextforge-gateway-rs -- \
   --address 0.0.0.0:8001 \
   --redis-port 6379 \
   --redis-address 127.0.0.1 \
@@ -128,21 +130,25 @@ curl --silent --show-error --request POST \
   }'
 ```
 
-Register the payload marker config in Redis. The `kind` value must match the factory name registered by the gateway build for `cpex-payload-marker`:
+Register the payload marker config in Redis:
 
 ```bash
-redis-cli SET ContextForgeGatewayRuntimePluginConfig '{
+docker compose -f docker/docker-compose-local.yaml exec -T redis redis-cli SET ContextForgeGatewayRuntimePluginConfig '{
   "version": 1,
   "cpex": {
     "plugins": [
       {
         "name": "payload-marker",
-        "kind": "builtin",
+        "kind": "contextforge/payload-marker",
         "hooks": ["cmf.tool_post_invoke"]
       }
     ]
   }
 }'
+```
+
+```bash
+sleep 3
 ```
 
 Open an MCP session:
@@ -188,7 +194,7 @@ curl --silent --show-error \
     "id": 1,
     "method": "tools/call",
     "params": {
-      "name": "say_hello",
+      "name": "gateway-one-say_hello",
       "arguments": {}
     }
   }'
