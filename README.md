@@ -59,12 +59,14 @@ cargo run --release --bin contextforge-gateway-rs -- \
   --token-verification-public-key assets/jwt.key.pub \
   --token-verification-private-key assets/jwt.key \
   --number-of-cpus 16 \
+  --redis-mode=plain-text \
+  --upstream-connection-mode=plain-text-or-tls \
   --runtime-plugins-enabled true
 ```
 
 Plugin configuration is stored in Redis at key `ContextForgeGatewayRuntimePluginConfig`. The value can be JSON or MessagePack with `version: 1` and `cpex` containing the CPEX config. The gateway reloads that key while running, builds a new initialized CPEX runtime, and swaps the runtime registry to the new immutable `PluginManager`. The existing `PluginManager` is not mutated after initialization.
 
-This integration currently passes only tool payloads. CPEX configs that enable route-based plugin selection or depend on user, tenant, server, agent, tag, tool metadata, route overrides, or other extension scopes are rejected in this PR. Redis write access to this key is a control-plane trust boundary because it controls which registered hooks run.
+This integration currently passes only tool payloads. CPEX configs that enable route-based plugin selection, plugin directories, global policies/defaults, non-tool hooks, or plugin conditions are rejected in this PR. Redis write access to this key is a control-plane trust boundary because it controls which registered hooks run.
 
 ### Payload Marker Demo
 

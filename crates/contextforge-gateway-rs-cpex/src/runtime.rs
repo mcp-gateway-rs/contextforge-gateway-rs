@@ -79,7 +79,12 @@ impl GatewayPluginRuntime {
 }
 
 fn validate_gateway_supported_config(config: &CpexConfig) -> Result<(), GatewayPluginRuntimeError> {
-    if config.routing_enabled() || !config.routes.is_empty() || !config.plugin_dirs.is_empty() {
+    if config.routing_enabled()
+        || !config.routes.is_empty()
+        || !config.plugin_dirs.is_empty()
+        || !config.global.policies.is_empty()
+        || !config.global.defaults.is_empty()
+    {
         return Err(GatewayPluginRuntimeError::ConfigUnsupported);
     }
 
