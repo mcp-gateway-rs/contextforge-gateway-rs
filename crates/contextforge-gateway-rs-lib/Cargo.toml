@@ -63,6 +63,7 @@ mockito = "1.7.2"
 axum-test = "20.0.0"
 test-log = "0.2.20"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
+futures.workspace = true
 
 [lints]
 workspace = true

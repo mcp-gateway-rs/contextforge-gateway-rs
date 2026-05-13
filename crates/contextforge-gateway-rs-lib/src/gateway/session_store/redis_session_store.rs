@@ -2,7 +2,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use lru_time_cache::LruCache;
-use redis::{AsyncCommands, RedisError, cmd};
+use redis::{
+    AsyncCommands, RedisError,
+    aio::{ConnectionManager, ConnectionManagerConfig},
+    cmd,
+};
 use tokio::sync::Mutex;
 
 use super::{SessionMapping, SessionStoreError, UserSession, UserSessionStore};
@@ -13,19 +17,23 @@ use crate::{
 
 #[derive(Clone)]
 pub struct RedisUserSessionStore {
-    redis_client: RedisClient,
     cache: Arc<Mutex<LruCache<UserSession, SessionMapping>>>,
+    connection: ConnectionManager,
 }
+
 impl RedisUserSessionStore {
     #[expect(dead_code, reason = "Redis-backed user sessions are implemented but not wired by default")]
-    pub fn new(redis_client: RedisClient) -> Self {
-        Self {
-            redis_client,
+    pub async fn new(redis_client: &RedisClient) -> crate::Result<Self> {
+        Ok(Self {
             cache: Arc::new(Mutex::new(LruCache::with_expiry_duration_and_capacity(
                 LRU_CACHE_EXPIRY_DURATION,
                 LRU_CACHE_ENTRIES,
             ))),
-        }
+            connection: redis_client
+                .get_connection_manager_with_config(ConnectionManagerConfig::default())
+                .await
+                .map_err(|_| SessionStoreError::InvalidConnection)?,
+        })
     }
 }
 
@@ -44,9 +52,7 @@ impl UserSessionStore for RedisUserSessionStore {
                 return Err(SessionStoreError::DataEncoding);
             };
 
-            let Ok(mut connection) = self.redis_client.get_multiplexed_async_connection().await else {
-                return Err(SessionStoreError::InvalidConnection);
-            };
+            let mut connection = self.connection.clone();
 
             let maybe_user_session: Result<Option<Vec<u8>>, RedisError> =
                 cmd("GET").arg(key).take().query_async(&mut connection).await;
@@ -77,9 +83,7 @@ impl UserSessionStore for RedisUserSessionStore {
             return Err(SessionStoreError::DataEncoding);
         };
 
-        let Ok(mut connection) = self.redis_client.get_multiplexed_async_connection().await else {
-            return Err(SessionStoreError::InvalidConnection);
-        };
+        let mut connection = self.connection.clone();
 
         if connection.set::<&[u8], &[u8], String>(&key, &encoded).await.is_ok() {
             self.cache.lock().await.insert(session_key.clone(), mapping.clone());

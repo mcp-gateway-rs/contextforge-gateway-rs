@@ -1,11 +1,12 @@
 use axum::{body::Body, extract::State, middleware::Next, response::Response};
+use contextforge_gateway_rs_apis::User;
 use http::{StatusCode, header};
 use openid::Claims;
 use tracing::{debug, info, warn};
 
 use crate::{
     common::{ContextForgeGatewayAppState, ContextForgeGatewayClaims},
-    user_config_store::{ConfigStoreError, User},
+    user_config_store::ConfigStoreError,
 };
 
 pub async fn user_config_store_layer(

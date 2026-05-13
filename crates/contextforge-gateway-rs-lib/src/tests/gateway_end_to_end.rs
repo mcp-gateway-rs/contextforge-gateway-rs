@@ -7,7 +7,10 @@ use std::{
     time::Duration,
 };
 
-use contextforge_gateway_rs_apis::user_store::{BackendMCPGateway, UserConfig, VirtualHost};
+use contextforge_gateway_rs_apis::{
+    User,
+    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
+};
 use futures::{FutureExt, future::BoxFuture};
 use http::{HeaderMap, HeaderValue};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -27,7 +30,7 @@ use crate::{
     Config, Gateway,
     common::DefaultClaims,
     tests::{mock_counter, mocked_user_config_store::MockedUserConfigStore},
-    user_config_store::{User, UserConfigStore},
+    user_config_store::UserConfigStore,
 };
 
 const MOCK_COUNTER_TOOL_NAMES: &[&str] =
@@ -158,8 +161,9 @@ async fn create_gateway_with_four_counters(user: &str, config: Config) -> crate:
 
     let gateway = Gateway::builder()
         .with_config(config.clone())
-        .with_user_config_store(Arc::new(mocked_user_config_store))
+        //.with_user_config_store(Arc::new(mocked_user_config_store))
         .with_session_manager(Arc::new(LocalSessionManager::default()))
+        .with_user_config_store_type(crate::UserConfigStoreType::Test(Arc::new(mocked_user_config_store)))
         .build();
 
     let gateway = async move {
@@ -225,8 +229,9 @@ async fn create_tls_gateway_with_four_tls_counters(user: &str, config: Config) -
 
     let gateway = Gateway::builder()
         .with_config(config.clone())
-        .with_user_config_store(Arc::new(mocked_user_config_store))
+        //.with_user_config_store(Arc::new(mocked_user_config_store))
         .with_session_manager(Arc::new(LocalSessionManager::default()))
+        .with_user_config_store_type(crate::UserConfigStoreType::Test(Arc::new(mocked_user_config_store)))
         .build();
 
     let gateway = async move {

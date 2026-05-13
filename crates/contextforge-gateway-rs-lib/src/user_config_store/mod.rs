@@ -1,6 +1,6 @@
 mod redis_config_store;
 use async_trait::async_trait;
-use contextforge_gateway_rs_apis::user_store::UserConfig;
+use contextforge_gateway_rs_apis::{User, user_store::UserConfig};
 
 pub use redis_config_store::RedisUserConfigStore;
 use serde::{Deserialize, Serialize};
@@ -17,24 +17,6 @@ pub enum ConfigStoreError {
     DataEncoding,
     #[error("unable to write to store")]
     CantWriteData,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, Hash, PartialEq, PartialOrd, Ord, Eq)]
-pub struct User<'a> {
-    name: &'static str,
-    key: &'a str,
-}
-
-impl User<'_> {
-    pub fn key(&self) -> &str {
-        self.key
-    }
-}
-
-impl<'a> User<'a> {
-    pub fn new(key: &'a str) -> Self {
-        Self { name: "UserConfig", key }
-    }
 }
 
 #[async_trait]

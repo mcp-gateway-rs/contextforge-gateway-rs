@@ -7,15 +7,12 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{Router, get, post},
 };
-use contextforge_gateway_rs_apis::user_store::UserConfig;
+use contextforge_gateway_rs_apis::{User, user_store::UserConfig};
 use http::{StatusCode, header};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 
 //use tracing::debug;
-use crate::{
-    common::{ContextForgeGatewayAppState, DefaultClaims},
-    user_config_store::User,
-};
+use crate::common::{ContextForgeGatewayAppState, DefaultClaims};
 
 pub fn add_tools(router: Router<ContextForgeGatewayAppState>) -> Router<ContextForgeGatewayAppState> {
     router
