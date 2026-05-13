@@ -4,7 +4,7 @@ name = "contextforge-gateway-rs-lib"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license-file.workspace = true
+license.workspace = true
 keywords.workspace = true
 
 
@@ -46,8 +46,8 @@ lru_time_cache = "0.11.11"
 hyper-util = "0.1.20"
 hyper = { version = "1.4.0" }
 rustls.workspace = true
-rustls-pki-types = { version = "1.14.1", features = ["std"] }
-rustls-pemfile = "2.2.0"
+rustls-pki-types = { version = "1.14.1", features = ["std","alloc"] }
+
 tokio-rustls = "0.26.4"
 typed-builder.workspace = true
 

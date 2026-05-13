@@ -4,7 +4,7 @@ name = "contextforge-gateway-rs-apis"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license-file.workspace = true
+license.workspace = true
 keywords.workspace = true
 
 
