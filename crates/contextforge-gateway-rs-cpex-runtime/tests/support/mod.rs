@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use contextforge_gateway_rs_cpex_runtime::{CpexRuntimeRegistry, GatewayPluginRuntimeError, RuntimePluginConfigStore};
 use contextforge_gateway_rs_lib::{
     BackendMCPGateway, Config, ConfigStoreError, DefaultClaims, Gateway, UpstreamConnectionMode, User, UserConfig,
-    UserConfigStore, VirtualHost,
+    UserConfigStore, UserConfigStoreType, VirtualHost,
 };
 use cpex_core::{
     cmf::{CmfHook, ContentPart, Message, MessagePayload, Role},
@@ -456,7 +456,7 @@ async fn start_gateway_with_runtime(
             runtime_plugins_enabled: Some(runtime_plugins_enabled),
             ..Default::default()
         })
-        .with_user_config_store(Arc::new(user_store))
+        .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(user_store)))
         .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_plugin_runtime(gateway_plugin_runtime)
         .build();
