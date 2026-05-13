@@ -544,7 +544,6 @@ dependencies = [
  "axum",
  "contextforge-gateway-rs-lib",
  "cpex-core",
- "cpex-payload-marker",
  "futures",
  "http",
  "jsonwebtoken",
@@ -681,25 +680,6 @@ dependencies = [
  "tracing",
  "uuid",
  "wildmatch",
-]
-
-[[package]]
-name = "cpex-payload-marker"
-version = "0.1.0"
-source = "git+ssh://git@github.com/contextforge-gateway-rs/cpex-plugins-rs.git?rev=4ec5799c75d38a7dd324392c8aa7fa086356db6b#4ec5799c75d38a7dd324392c8aa7fa086356db6b"
-dependencies = [
- "cpex-sdk",
-]
-
-[[package]]
-name = "cpex-sdk"
-version = "0.1.0"
-source = "git+https://github.com/contextforge-org/contextforge-plugins-framework?rev=5ae3f120eb9af227b4eac1804156cd463bcd4eee#5ae3f120eb9af227b4eac1804156cd463bcd4eee"
-dependencies = [
- "async-trait",
- "cpex-core",
- "serde",
- "serde_json",
 ]
 
 [[package]]
