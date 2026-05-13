@@ -75,11 +75,11 @@ impl GatewayPluginRuntime {
         Ok(Self { inner: Arc::new(PluginRuntimeInner { manager, has_pre_hook, has_post_hook }) })
     }
 
-    async fn invoke_tool_pre(&self, payload: MessagePayload, extensions: Extensions) -> PipelineResult {
+    async fn invoke_tool_pre(&self, payload: MessagePayload) -> PipelineResult {
         let (result, background_tasks) = self
             .inner
             .manager
-            .invoke_named::<CmfHook>(cmf_hook_names::TOOL_PRE_INVOKE, payload, extensions, None)
+            .invoke_named::<CmfHook>(cmf_hook_names::TOOL_PRE_INVOKE, payload, Extensions::default(), None)
             .await;
         log_pipeline_errors(cmf_hook_names::TOOL_PRE_INVOKE, &result);
         drop(background_tasks);
@@ -89,13 +89,12 @@ impl GatewayPluginRuntime {
     async fn invoke_tool_post(
         &self,
         payload: MessagePayload,
-        extensions: Extensions,
         context_table: Option<PluginContextTable>,
     ) -> PipelineResult {
         let (result, background_tasks) = self
             .inner
             .manager
-            .invoke_named::<CmfHook>(cmf_hook_names::TOOL_POST_INVOKE, payload, extensions, context_table)
+            .invoke_named::<CmfHook>(cmf_hook_names::TOOL_POST_INVOKE, payload, Extensions::default(), context_table)
             .await;
         log_pipeline_errors(cmf_hook_names::TOOL_POST_INVOKE, &result);
         drop(background_tasks);
@@ -112,7 +111,7 @@ impl GatewayPluginRuntime {
         }
 
         let original_payload = tool_call_payload(request, tool_name);
-        let pre_result = self.invoke_tool_pre(original_payload, Extensions::default()).await;
+        let pre_result = self.invoke_tool_pre(original_payload).await;
         if pre_result.is_denied() {
             return Err(plugin_denied_error(pre_result));
         }
@@ -134,9 +133,7 @@ impl GatewayPluginRuntime {
 
         let state = state.and_then(|state| state.downcast::<ToolCallState>().ok());
         let context_table = state.map(|state| state.context_table);
-        let post_result = self
-            .invoke_tool_post(tool_result_payload(tool_name, &response), Extensions::default(), context_table)
-            .await;
+        let post_result = self.invoke_tool_post(tool_result_payload(tool_name, &response), context_table).await;
         if post_result.is_denied() {
             return Err(plugin_denied_error(post_result));
         }
