@@ -276,45 +276,60 @@ where
                 data: None,
             });
         };
+        let backend_name = backend_name.to_owned();
+        let tool_name = tool_name.to_owned();
 
         let pre_result = if let Some(plugin_runtime) = &self.plugin_runtime {
-            plugin_runtime.before_tool_call(&request, tool_name).await?
+            plugin_runtime.before_tool_call(&request, &tool_name).await?
         } else {
             ToolPreCallResult::unchanged()
         };
         let post_state = pre_result.state;
-        let mut routed_request = request.clone();
-        pre_result.arguments.apply_to_request(&mut routed_request, tool_name);
+        let request_name = request.name.clone();
+        let mut routed_request = request;
+        pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
+        let mut routed_request = Some(routed_request);
 
         let backend_transports = session_manager.borrow_transports().await;
         info!("Borrowed transports {session_id:?} {backend_transports:?}");
+        if backend_transports.iter().filter(|service_holder| service_holder.name == backend_name).count() > 1 {
+            warn!("call_tool: More than one tool matching for tool name {}", request_name);
+
+            session_manager.cleanup_backends("call_tool: invalid session.. duplicate tools detected").await;
+
+            return Err(ErrorData {
+                code: ErrorCode::INVALID_REQUEST,
+                message: "Routing problem... multiple matching tools".into(),
+                data: None,
+            });
+        }
 
         let call_tool_tasks: Vec<_> = backend_transports
             .into_iter()
             .filter_map(|service_holder| {
                 debug!(
                     "call_tool: Finding backend for {} {service_holder:?} {backend_name} tool_name = {tool_name}",
-                    &request.name,
+                    &request_name,
 
                 );
                 (service_holder.name == backend_name).then(|| {
-                    let request = routed_request.clone();
+                    let request = routed_request.take().expect("routed request is used once");
+                    let backend_name_for_log = backend_name.clone();
+                    let tool_name_for_log = tool_name.clone();
                     async move {
-                            if let Some(service) = service_holder.running_service {
-//                                let service = service.read().await;
-                                let response = service.call_tool(request).await;
-
-                                (service_holder.name, Some(response))
-                            } else {
-                                warn!("call_tool: trying to call a tool for which we have no backend {service_holder:?} {backend_name} tool_name = {tool_name}");
-                                (service_holder.name, None)
-                            }
+                        if let Some(service) = service_holder.running_service {
+                            let response = service.call_tool(request).await;
+                            (service_holder.name, Some(response))
+                        } else {
+                            warn!("call_tool: trying to call a tool for which we have no backend {service_holder:?} {backend_name_for_log} tool_name = {tool_name_for_log}");
+                            (service_holder.name, None)
+                        }
                     }
                 })
             }).collect();
 
         if call_tool_tasks.len() > 1 {
-            warn!("call_tool: More than one tool matching for tool name {}", request.name);
+            warn!("call_tool: More than one tool matching for tool name {}", request_name);
 
             session_manager.cleanup_backends("call_tool: invalid session.. duplicate tools detected").await;
 
@@ -348,7 +363,7 @@ where
             data: None,
         })?;
         if let Some(plugin_runtime) = &self.plugin_runtime {
-            plugin_runtime.after_tool_call(tool_name, response, post_state).await
+            plugin_runtime.after_tool_call(&tool_name, response, post_state).await
         } else {
             Ok(response)
         }

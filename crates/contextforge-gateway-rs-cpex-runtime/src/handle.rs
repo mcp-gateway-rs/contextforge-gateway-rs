@@ -64,14 +64,14 @@ impl CpexRuntimeRegistry {
     }
 
     pub async fn reload(&self) -> Result<(), GatewayPluginRuntimeError> {
-        reload_runtime(&self.runtime, self.config_store.as_ref(), &self.factories).await
+        reload_runtime(&self.runtime, self.config_store.as_ref(), &self.factories).await.map(|_| ())
     }
 
     fn current(&self) -> Arc<GatewayPluginRuntime> {
         self.runtime.load_full()
     }
 
-    fn start_config_watcher(&self) {
+    fn start_config_watcher(&self, initial_config: Option<serde_json::Value>) {
         let Some(config_store) = self.config_store.clone() else {
             return;
         };
@@ -82,16 +82,14 @@ impl CpexRuntimeRegistry {
         let runtime = Arc::clone(&self.runtime);
         let factories = Arc::clone(&self.factories);
         tokio::spawn(async move {
-            let mut last_config = None;
+            let mut last_applied_config = initial_config;
             loop {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 match config_store.get_config().await {
-                    Ok(config) if config == last_config => {},
-                    Ok(config) => {
-                        last_config = config.clone();
-                        if let Err(error) = apply_runtime_config(&runtime, &factories, config).await {
-                            tracing::warn!(%error, "failed to reload CPEX runtime plugin config");
-                        }
+                    Ok(config) if config == last_applied_config => {},
+                    Ok(config) => match apply_runtime_config(&runtime, &factories, config.clone()).await {
+                        Ok(()) => last_applied_config = config,
+                        Err(error) => tracing::warn!(%error, "failed to reload CPEX runtime plugin config"),
                     },
                     Err(error) => tracing::warn!(%error, "failed to load CPEX runtime plugin config"),
                 }
@@ -104,11 +102,13 @@ async fn reload_runtime(
     runtime: &ArcSwap<GatewayPluginRuntime>,
     config_store: Option<&Arc<dyn RuntimePluginConfigStore>>,
     factories: &PluginFactoryRegistry,
-) -> Result<(), GatewayPluginRuntimeError> {
+) -> Result<Option<serde_json::Value>, GatewayPluginRuntimeError> {
     let Some(config_store) = config_store else {
-        return Ok(());
+        return Ok(None);
     };
-    apply_runtime_config(runtime, factories, config_store.get_config().await?).await
+    let config = config_store.get_config().await?;
+    apply_runtime_config(runtime, factories, config.clone()).await?;
+    Ok(config)
 }
 
 async fn apply_runtime_config(
@@ -145,8 +145,8 @@ async fn retire_runtime(runtime: Arc<GatewayPluginRuntime>) {
 #[async_trait]
 impl GatewayToolRuntime for CpexRuntimeRegistry {
     async fn initialize(&self) -> Result<(), contextforge_gateway_rs_lib::RuntimeHookError> {
-        self.reload().await?;
-        self.start_config_watcher();
+        let initial_config = reload_runtime(&self.runtime, self.config_store.as_ref(), &self.factories).await?;
+        self.start_config_watcher(initial_config);
         Ok(())
     }
 
@@ -157,7 +157,9 @@ impl GatewayToolRuntime for CpexRuntimeRegistry {
     ) -> Result<ToolPreCallResult, ErrorData> {
         let runtime = self.current();
         let mut result = runtime.before_tool_call(request, tool_name).await?;
-        result.state = Some(Box::new(RegistryToolCallState { runtime, state: result.state }));
+        if runtime.has_post_hook() {
+            result.state = Some(Box::new(RegistryToolCallState { runtime, state: result.state }));
+        }
         Ok(result)
     }
 

@@ -1,5 +1,10 @@
 use async_trait::async_trait;
-use redis::{Client, RedisError, cmd};
+use redis::{
+    Client, RedisError,
+    aio::{ConnectionManager, ConnectionManagerConfig},
+    cmd,
+};
+use tokio::sync::Mutex;
 
 use crate::error::GatewayPluginRuntimeError;
 
@@ -24,23 +29,34 @@ pub(crate) fn cpex_config_from_document(
     }
 }
 
-#[derive(Clone)]
 pub struct RedisRuntimePluginConfigStore {
     redis_client: Client,
+    connection: Mutex<Option<ConnectionManager>>,
 }
 
 impl RedisRuntimePluginConfigStore {
     pub fn new(redis_client: Client) -> Self {
-        Self { redis_client }
+        Self { redis_client, connection: Mutex::new(None) }
+    }
+
+    async fn connection(&self) -> Result<ConnectionManager, GatewayPluginRuntimeError> {
+        let mut connection = self.connection.lock().await;
+        if connection.is_none() {
+            *connection = Some(
+                self.redis_client
+                    .get_connection_manager_with_config(ConnectionManagerConfig::default())
+                    .await
+                    .map_err(|_| GatewayPluginRuntimeError::ConfigStoreUnavailable)?,
+            );
+        }
+        connection.clone().ok_or(GatewayPluginRuntimeError::ConfigStoreUnavailable)
     }
 }
 
 #[async_trait]
 impl RuntimePluginConfigStore for RedisRuntimePluginConfigStore {
     async fn get_config(&self) -> Result<Option<serde_json::Value>, GatewayPluginRuntimeError> {
-        let Ok(mut connection) = self.redis_client.get_multiplexed_async_connection().await else {
-            return Err(GatewayPluginRuntimeError::ConfigStoreUnavailable);
-        };
+        let mut connection = self.connection().await?;
 
         let maybe_config: Result<Option<Vec<u8>>, RedisError> =
             cmd("GET").arg(RUNTIME_PLUGIN_CONFIG_KEY).take().query_async(&mut connection).await;
