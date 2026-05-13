@@ -1,4 +1,5 @@
 use contextforge_gateway_rs_lib::Config;
+
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::trace::{RandomIdGenerator, Sampler};

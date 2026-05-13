@@ -16,9 +16,9 @@ tracing-appender.workspace = true
 tracing-opentelemetry.workspace = true
 tracing-subscriber.workspace = true
 tokio.workspace = true
-opentelemetry = "0.32"
-opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic"] }
-opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
+opentelemetry = "0.31"
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
 num_cpus = "1.17.0"
 rmcp.workspace = true
 tikv-jemallocator = "0.6.1"
