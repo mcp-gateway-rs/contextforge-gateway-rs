@@ -79,6 +79,36 @@ async fn scoped_runtime_plugin_config_is_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn global_policy_runtime_plugin_config_is_rejected() {
+    let config_store = MemoryRuntimePluginConfigStore::with_config(json!({
+        "version": 1,
+        "cpex": {
+            "global": {
+                "policies": {
+                    "all": {
+                        "plugins": ["configured-pre"]
+                    }
+                },
+                "defaults": {
+                    "tool": {
+                        "plugins": ["configured-pre"]
+                    }
+                }
+            },
+            "plugins": [{
+                "name": "configured-pre",
+                "kind": "test",
+                "hooks": [cmf_hook_names::TOOL_PRE_INVOKE]
+            }]
+        }
+    }));
+    let runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store));
+    let error = GatewayToolRuntime::initialize(&runtime).await.expect_err("global policy config is rejected");
+
+    assert_eq!("runtime plugin config is unsupported", error.to_string());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn non_tool_runtime_plugin_hook_is_rejected() {
     let config_store = MemoryRuntimePluginConfigStore::with_config(json!({
         "version": 1,
