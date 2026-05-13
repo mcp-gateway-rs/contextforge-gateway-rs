@@ -2,7 +2,7 @@ mod support;
 
 use std::sync::Arc;
 
-use contextforge_gateway_rs_cpex_runtime::CpexRuntimeRegistry;
+use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use contextforge_gateway_rs_lib::GatewayToolRuntime;
 use cpex_core::hooks::types::cmf_hook_names;
 

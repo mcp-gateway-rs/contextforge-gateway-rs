@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use contextforge_gateway_rs_cpex_runtime::CpexRuntimeRegistry;
+use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use serde_json::{Value, json};
 
 use super::{MemoryRuntimePluginConfigStore, TestPlugin, TestPluginFactory};

@@ -1,4 +1,4 @@
-use contextforge_gateway_rs_cpex_runtime::{CmfPluginFactory, CpexRuntimeRegistry};
+use contextforge_gateway_rs_cpex::{CmfPluginFactory, CpexRuntimeRegistry};
 
 pub fn register(runtime: &mut CpexRuntimeRegistry) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     runtime.register_factory(

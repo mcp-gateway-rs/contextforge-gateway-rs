@@ -10,7 +10,7 @@ use contextforge_gateway_rs_apis::{
     User,
     user_store::{BackendMCPGateway, UserConfig, VirtualHost},
 };
-use contextforge_gateway_rs_cpex_runtime::CpexRuntimeRegistry;
+use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use contextforge_gateway_rs_lib::{
     Config, ConfigStoreError, Gateway, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType,
 };

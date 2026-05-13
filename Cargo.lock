@@ -507,8 +507,9 @@ checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 name = "contextforge-gateway-rs"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
- "contextforge-gateway-rs-cpex-runtime",
+ "contextforge-gateway-rs-cpex",
  "contextforge-gateway-rs-lib",
  "cpex-payload-marker",
  "cpex-text-prefixer",
@@ -538,7 +539,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "contextforge-gateway-rs-cpex-runtime"
+name = "contextforge-gateway-rs-cpex"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
