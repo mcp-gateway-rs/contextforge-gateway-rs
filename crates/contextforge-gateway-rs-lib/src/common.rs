@@ -12,6 +12,8 @@ use clap::{Parser, ValueEnum};
 use http::uri::Authority;
 use openid::{CompactJson, CustomClaims, StandardClaims};
 use redis::{ConnectionAddr, IntoConnectionInfo, RedisError};
+
+use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer, pem::PemObject};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::Url;
@@ -230,14 +232,11 @@ fn validate_certs(path: &PathBuf) -> Result<Vec<u8>, ConfigValidationError> {
         .map_err(|e| ConfigValidationError::RedisConfigurationError(e.to_string()))?;
     let mut cursor = Cursor::new(buf);
 
-    let mut count = 0;
-    for cert in rustls_pemfile::certs(&mut cursor) {
-        if let Err(e) = cert {
-            return Err(ConfigValidationError::RedisConfigurationError(e.to_string()));
-        }
-        count += 1;
-    }
-    if count == 0 {
+    let certs = CertificateDer::pem_reader_iter(&mut cursor)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| ConfigValidationError::RedisConfigurationError(e.to_string()))?;
+
+    if certs.is_empty() {
         Err(ConfigValidationError::RedisConfigurationError("No certificates provided".to_owned()))
     } else {
         Ok(cursor.into_inner())
@@ -250,13 +249,10 @@ fn validate_key(path: &PathBuf) -> Result<Vec<u8>, ConfigValidationError> {
         .map_err(|e| ConfigValidationError::RedisConfigurationError(e.to_string()))?
         .read_to_end(&mut buf)
         .map_err(|e| ConfigValidationError::RedisConfigurationError(e.to_string()))?;
-    let mut cursor = Cursor::new(buf);
 
-    if let Ok(Some(_)) = rustls_pemfile::private_key(&mut cursor) {
-        Ok(cursor.into_inner())
-    } else {
-        Err(ConfigValidationError::RedisConfigurationError("Private key is wrong".to_owned()))
-    }
+    let _ = PrivatePkcs8KeyDer::from_pem_slice(&buf)
+        .map_err(|_| ConfigValidationError::RedisConfigurationError("Private key is invalid".to_owned()))?;
+    Ok(buf)
 }
 
 impl TryFrom<&Config> for reqwest::Client {

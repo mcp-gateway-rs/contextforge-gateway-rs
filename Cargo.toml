@@ -69,6 +69,7 @@ reqwest = "0.13"
 itertools = "0.14"
 typed-builder = "0.23.2"
 rustls = "0.23"
+rustls-pki-types = "1.14.1"
 
 [profile.release]
 codegen-units = 1
