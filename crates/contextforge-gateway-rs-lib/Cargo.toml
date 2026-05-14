@@ -55,6 +55,7 @@ typed-builder.workspace = true
 [features]
 default = []
 with_tools = []
+loom = []
 
 
 [dev-dependencies]
@@ -64,6 +65,7 @@ axum-test = "20.0.0"
 test-log = "0.2.20"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 futures.workspace = true
+loom = "0.7.2"
 
 [lints]
 workspace = true

@@ -78,3 +78,7 @@ pub trait UserSessionStore: Send + Sync {
         session_mapping: &'a SessionMapping,
     ) -> Result<(), SessionStoreError>;
 }
+
+#[cfg(all(test, miri))]
+#[path = "../miri_checks/config_serialization.rs"]
+mod miri_checks;

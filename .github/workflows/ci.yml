@@ -55,6 +55,25 @@ jobs:
           tool: cargo-nextest
       - run: cargo nextest run --locked --workspace
 
+  loom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2.9.1
+      - run: cargo test --locked -p contextforge-gateway-rs-lib --features loom gateway::session_manager::concurrency
+
+  miri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2.9.1
+      - run: cargo miri setup
+      - run: cargo miri test --locked -p contextforge-gateway-rs-lib miri_checks
+
   build:
     runs-on: ubuntu-latest
     steps:

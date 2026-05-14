@@ -29,7 +29,7 @@ use crate::{
     SessionId,
     gateway::{
         mcp_call_validator::InitializeCallValidator,
-        session_manager::SessionManager,
+        session_manager::{SessionManager, return_transport_entry},
         session_store::{UserSession, UserSessionStore},
     },
 };
@@ -252,7 +252,8 @@ where
 
         let mut transports = self.transports.lock().await;
         for (name, svc) in backend_services {
-            transports.entry(BackendTransportKey::from((&name, session_id))).and_modify(|e| e.service = svc);
+            let key = BackendTransportKey::from((&name, session_id));
+            return_transport_entry(&mut transports, &key, svc, |entry| &mut entry.service);
         }
         drop(transports);
 
@@ -399,7 +400,8 @@ where
 
         let mut transports = self.transports.lock().await;
         for (name, svc) in backend_services {
-            transports.entry(BackendTransportKey::from((&name, session_id))).and_modify(|e| e.service = svc);
+            let key = BackendTransportKey::from((&name, session_id));
+            return_transport_entry(&mut transports, &key, svc, |entry| &mut entry.service);
         }
         drop(transports);
 
@@ -806,3 +808,7 @@ mod tests {
         assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
     }
 }
+
+#[cfg(all(test, miri))]
+#[path = "miri_checks/namespace_routing.rs"]
+mod miri_checks;
