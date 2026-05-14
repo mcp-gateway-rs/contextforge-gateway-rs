@@ -3,6 +3,7 @@ mod support;
 use std::sync::Arc;
 
 use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
+use cpex_core::cmf::Role;
 use cpex_core::hooks::types::cmf_hook_names;
 use rmcp::model::ErrorCode;
 use serde_json::{Value, json};
@@ -65,6 +66,8 @@ async fn pre_hook_modifies_backend_arguments_without_rerouting_tool() {
     let observations = observations.lock().expect("observations lock poisoned");
     assert_eq!(1, observations.pre_calls);
     assert_eq!(Some("sum".to_owned()), observations.pre_payload_name);
+    assert_eq!(Some(gateway.backend_name.clone()), observations.pre_payload_namespace);
+    assert_eq!(Some(Role::Assistant), observations.pre_payload_role);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

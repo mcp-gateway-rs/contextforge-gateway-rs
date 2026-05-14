@@ -293,7 +293,7 @@ where
         let tool_name = tool_name.to_owned();
 
         let pre_result = if let Some(plugin_runtime) = &self.plugin_runtime {
-            plugin_runtime.before_tool_call(&request, &tool_name).await?
+            plugin_runtime.before_tool_call(&request, &tool_name, &backend_name).await?
         } else {
             ToolPreCallResult::unchanged()
         };

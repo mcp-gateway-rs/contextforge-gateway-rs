@@ -29,7 +29,7 @@ pub(crate) fn effective_pre_args(
         });
     };
 
-    if original_args == Some(&arguments) {
+    if original_args == Some(&arguments) || (original_args.is_none() && arguments.is_empty()) {
         Ok(ToolArgumentsUpdate::Unchanged)
     } else {
         Ok(ToolArgumentsUpdate::Replace(Some(arguments.clone())))

@@ -146,7 +146,7 @@ async fn runtime_config_loads_registered_factory_plugin() {
         .expect("test factory registers");
 
     GatewayToolRuntime::initialize(&runtime).await.expect("runtime initializes");
-    let result = runtime.before_tool_call(&sum_request("sum", 1, 2), "sum").await.expect("pre hook runs");
+    let result = runtime.before_tool_call(&sum_request("sum", 1, 2), "sum", "backend").await.expect("pre hook runs");
 
     match result.arguments {
         ToolArgumentsUpdate::Replace(Some(args)) => {
@@ -176,7 +176,7 @@ async fn runtime_config_loads_generic_cmf_factory_plugin() {
         .expect("test factory registers");
 
     GatewayToolRuntime::initialize(&runtime).await.expect("runtime initializes");
-    let result = runtime.before_tool_call(&sum_request("sum", 1, 2), "sum").await.expect("pre hook runs");
+    let result = runtime.before_tool_call(&sum_request("sum", 1, 2), "sum", "backend").await.expect("pre hook runs");
 
     match result.arguments {
         ToolArgumentsUpdate::Replace(Some(args)) => {

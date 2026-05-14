@@ -117,8 +117,6 @@ async fn apply_runtime_config(
     config: Option<serde_json::Value>,
 ) -> Result<(), GatewayPluginRuntimeError> {
     let Some(config) = config else {
-        let old = runtime.swap(Arc::new(GatewayPluginRuntime::default()));
-        retire_runtime(old).await;
         return Ok(());
     };
     let config = serde_json::from_value(cpex_config_from_document(&config)?)
@@ -154,12 +152,12 @@ impl GatewayToolRuntime for CpexRuntimeRegistry {
         &self,
         request: &CallToolRequestParams,
         tool_name: &str,
+        backend_name: &str,
     ) -> Result<ToolPreCallResult, ErrorData> {
         let runtime = self.current();
-        let mut result = runtime.before_tool_call(request, tool_name).await?;
-        if runtime.has_post_hook() {
-            result.state = Some(Box::new(RegistryToolCallState { runtime, state: result.state }));
-        }
+        let mut result = runtime.before_tool_call(request, tool_name, backend_name).await?;
+        let state = if runtime.has_post_hook() { result.state } else { None };
+        result.state = Some(Box::new(RegistryToolCallState { runtime, state }));
         Ok(result)
     }
 

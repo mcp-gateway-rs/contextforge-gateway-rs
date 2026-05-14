@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 use async_trait::async_trait;
 use contextforge_gateway_rs_lib::{GatewayToolRuntime, RuntimeHookState, ToolPreCallResult};
@@ -35,6 +38,13 @@ struct PluginRuntimeInner {
 
 struct ToolCallState {
     context_table: PluginContextTable,
+    tool_call_id: String,
+}
+
+static TOOL_CALL_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_tool_call_id() -> String {
+    format!("gateway-tool-call-{}", TOOL_CALL_ID.fetch_add(1, Ordering::Relaxed))
 }
 
 impl Default for GatewayPluginRuntime {
@@ -136,19 +146,21 @@ impl GatewayPluginRuntime {
         &self,
         request: &CallToolRequestParams,
         tool_name: &str,
+        backend_name: &str,
     ) -> Result<ToolPreCallResult, ErrorData> {
         if !self.inner.has_pre_hook {
             return Ok(ToolPreCallResult::unchanged());
         }
 
-        let original_payload = tool_call_payload(request, tool_name);
+        let tool_call_id = next_tool_call_id();
+        let original_payload = tool_call_payload(request, tool_name, backend_name, &tool_call_id);
         let pre_result = self.invoke_tool_pre(original_payload).await;
         if pre_result.is_denied() {
             return Err(plugin_denied_error(pre_result));
         }
 
         let arguments = effective_pre_args(request.arguments.as_ref(), &pre_result)?;
-        let state = ToolCallState { context_table: pre_result.context_table };
+        let state = ToolCallState { context_table: pre_result.context_table, tool_call_id };
         Ok(ToolPreCallResult { arguments, state: Some(Box::new(state)) })
     }
 
@@ -163,8 +175,10 @@ impl GatewayPluginRuntime {
         }
 
         let state = state.and_then(|state| state.downcast::<ToolCallState>().ok());
-        let context_table = state.map(|state| state.context_table);
-        let post_result = self.invoke_tool_post(tool_result_payload(tool_name, &response), context_table).await;
+        let (context_table, tool_call_id) =
+            state.map_or_else(|| (None, next_tool_call_id()), |state| (Some(state.context_table), state.tool_call_id));
+        let post_result =
+            self.invoke_tool_post(tool_result_payload(tool_name, &response, &tool_call_id), context_table).await;
         if post_result.is_denied() {
             return Err(plugin_denied_error(post_result));
         }
@@ -179,8 +193,9 @@ impl GatewayToolRuntime for GatewayPluginRuntime {
         &self,
         request: &CallToolRequestParams,
         tool_name: &str,
+        backend_name: &str,
     ) -> Result<ToolPreCallResult, ErrorData> {
-        self.before_tool_call_inner(request, tool_name).await
+        self.before_tool_call_inner(request, tool_name, backend_name).await
     }
 
     async fn after_tool_call(

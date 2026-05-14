@@ -23,7 +23,11 @@ pub(crate) struct Observations {
     pub(crate) post_calls: usize,
     pub(crate) shutdown_calls: usize,
     pub(crate) pre_payload_name: Option<String>,
+    pub(crate) pre_payload_namespace: Option<String>,
+    pub(crate) pre_payload_role: Option<Role>,
+    pub(crate) pre_tool_call_id: Option<String>,
     pub(crate) post_payload_name: Option<String>,
+    pub(crate) post_tool_call_id: Option<String>,
     pub(crate) post_result_text: Option<String>,
 }
 
@@ -136,12 +140,19 @@ impl HookHandler<CmfHook> for TestPlugin {
         let mut observations = self.observations.lock().expect("observations lock poisoned");
         if is_post {
             observations.post_calls += 1;
-            observations.post_payload_name =
-                payload.message.get_tool_results().first().map(|result| result.tool_name.clone());
+            if let Some(result) = payload.message.get_tool_results().first() {
+                observations.post_payload_name = Some(result.tool_name.clone());
+                observations.post_tool_call_id = Some(result.tool_call_id.clone());
+            }
             observations.post_result_text = Some(cmf_result_text(payload));
         } else {
             observations.pre_calls += 1;
-            observations.pre_payload_name = payload.message.get_tool_calls().first().map(|call| call.name.clone());
+            if let Some(call) = payload.message.get_tool_calls().first() {
+                observations.pre_payload_name = Some(call.name.clone());
+                observations.pre_payload_namespace.clone_from(&call.namespace);
+                observations.pre_payload_role = Some(payload.message.role);
+                observations.pre_tool_call_id = Some(call.tool_call_id.clone());
+            }
         }
         drop(observations);
 

@@ -46,6 +46,7 @@ pub trait GatewayToolRuntime: Send + Sync {
         &self,
         request: &CallToolRequestParams,
         tool_name: &str,
+        backend_name: &str,
     ) -> Result<ToolPreCallResult, ErrorData>;
 
     async fn after_tool_call(
