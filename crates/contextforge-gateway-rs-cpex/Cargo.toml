@@ -19,14 +19,5 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
-[dev-dependencies]
-axum.workspace = true
-contextforge-gateway-rs-apis.workspace = true
-futures.workspace = true
-http.workspace = true
-jsonwebtoken.workspace = true
-openport = { version = "0.1.1", features = ["rand"] }
-reqwest.workspace = true
-
 [lints]
 workspace = true

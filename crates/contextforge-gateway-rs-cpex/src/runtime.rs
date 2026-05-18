@@ -22,6 +22,7 @@ use crate::{
     pipeline::{effective_post_result, effective_pre_args, log_pipeline_errors, plugin_denied_error},
 };
 
+#[derive(Default)]
 pub(crate) struct GatewayPluginRuntime {
     manager: PluginManager,
     has_pre_hook: bool,
@@ -37,12 +38,6 @@ static TOOL_CALL_ID: AtomicU64 = AtomicU64::new(1);
 
 fn next_tool_call_id() -> String {
     format!("gateway-tool-call-{}", TOOL_CALL_ID.fetch_add(1, Ordering::Relaxed))
-}
-
-impl Default for GatewayPluginRuntime {
-    fn default() -> Self {
-        Self { manager: PluginManager::default(), has_pre_hook: false, has_post_hook: false }
-    }
 }
 
 impl GatewayPluginRuntime {
