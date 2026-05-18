@@ -49,7 +49,7 @@ pub async fn claims_layer(
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header(header::CONTENT_TYPE, "text/plain")
-            .body(Body::from("Invalid algorithm"))
+            .body(Body::from("Invalid JWT header"))
             .expect("Expecting this to work");
     };
 
@@ -122,6 +122,8 @@ pub async fn claims_layer(
 #[cfg(test)]
 mod test {
 
+    use jsonwebtoken::{DecodingKey, Validation};
+
     use crate::{
         common::ContextForgeClaims,
         const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
@@ -130,7 +132,6 @@ mod test {
     #[test]
     fn claim_test() {
         rustls::crypto::ring::default_provider().install_default().expect("Failed to install rustls crypto provider");
-        use jsonwebtoken::{DecodingKey, Validation};
 
         let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbkBleGFtcGxlLmNvbSIsImp0aSI6Ijc1ZWYwZTZjLTZkZWMtNGExNy1hNzU3LWFlYmYzZjk1N2Q1NSIsInRva2VuX3VzZSI6ImFwaSIsImlhdCI6MTc3ODg2NTE2OCwiaXNzIjoibWNwZ2F0ZXdheSIsImF1ZCI6Im1jcGdhdGV3YXktYXBpIiwidXNlciI6eyJlbWFpbCI6ImFkbWluQGV4YW1wbGUuY29tIiwiZnVsbF9uYW1lIjoiQVBJIFRva2VuIFVzZXIiLCJpc19hZG1pbiI6dHJ1ZSwiYXV0aF9wcm92aWRlciI6ImFwaV90b2tlbiJ9LCJ0ZWFtcyI6bnVsbCwic2NvcGVzIjp7InNlcnZlcl9pZCI6bnVsbCwicGVybWlzc2lvbnMiOltdLCJpcF9yZXN0cmljdGlvbnMiOltdLCJ0aW1lX3Jlc3RyaWN0aW9ucyI6e319LCJleHAiOjE3ODE0NTcxNjh9.9d2-iLOHL2dJRFTSbOxHzuD6zLxupqK0ZkCG-3GZABU";
 

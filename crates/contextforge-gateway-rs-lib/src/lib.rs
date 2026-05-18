@@ -88,20 +88,26 @@ impl Gateway {
 
         let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any).expose_headers(Any);
 
-        let rs_decoding_key =
-            DecodingKey::from_rsa_pem(&fs::read(&config.token_verification_public_key).map_err(|e| {
-                format!("Error when creating local decoder {e:?} {}", config.token_verification_public_key.display())
-            })?)
-            .map_err(|e| {
-                format!("Error when creating local decoder {e:?} {}", config.token_verification_public_key.display())
-            })?;
+        let rs_decoding_key = config.token_verification_public_key.as_ref().map(|path| {
+            let Ok(key) =
+                fs::read(path).map_err(|e| format!("Error when creating local decoder {e:?} {}", path.display()))
+            else {
+                return Err(format!("Error when creating local decoder. Can't read path {}", path.display()));
+            };
 
-        let hmac_sha_decoding_key = DecodingKey::from_secret(config.token_verification_secret.as_bytes());
+            let Ok(key) = DecodingKey::from_rsa_pem(&key) else {
+                return Err(format!("Error when creating local decoder. Can't read the key {}", path.display()));
+            };
+            Ok(key)
+        });
 
         let mcp_add_state: ContextForgeGatewayAppState = ContextForgeGatewayAppState {
             jwt_token_decoding_keys: JwtTokenDecoders {
-                rs: Some(rs_decoding_key),
-                hmac_sha: Some(hmac_sha_decoding_key),
+                rs: rs_decoding_key.transpose()?,
+                hmac_sha: config
+                    .token_verification_secret
+                    .as_ref()
+                    .map(|token| DecodingKey::from_secret(token.as_bytes())),
             },
 
             config_store: Arc::clone(&user_config_store),

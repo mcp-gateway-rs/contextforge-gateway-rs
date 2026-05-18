@@ -163,14 +163,14 @@ pub struct Config {
     pub address: Option<SocketAddr>,
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PUBLIC_KEY")]
-    pub token_verification_public_key: PathBuf,
+    pub token_verification_public_key: Option<PathBuf>,
 
     #[cfg(feature = "with_tools")]
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TOKEN_VERIFICATION_PRIVATE_KEY")]
     pub token_verification_private_key: PathBuf,
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TOKEN_SECRET")]
-    pub token_verification_secret: String,
+    pub token_verification_secret: Option<String>,
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_ENABLE_OPEN_TELEMETRY")]
     pub enable_open_telemetry: Option<bool>,
