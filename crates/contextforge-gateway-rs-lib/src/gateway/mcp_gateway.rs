@@ -19,7 +19,7 @@ use rmcp::{
     service::{RequestContext, RunningService},
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 use typed_builder::TypedBuilder;
 
@@ -56,19 +56,16 @@ pub struct BackendTransportKey {
     session_id: String,
 }
 
-pub type BackendService = RunningService<RoleClient, InitializeRequestParams>;
+type McpClientService = Arc<RunningService<RoleClient, InitializeRequestParams>>;
 
 #[derive(Debug)]
 pub struct ServiceHolder {
     pub name: String,
-    pub running_service: Option<Arc<RwLock<RunningService<RoleClient, InitializeRequestParams>>>>,
+    pub running_service: Option<McpClientService>,
 }
 
 impl ServiceHolder {
-    pub fn new(
-        name: String,
-        running_service: Option<Arc<RwLock<RunningService<RoleClient, InitializeRequestParams>>>>,
-    ) -> ServiceHolder {
+    pub fn new(name: String, running_service: Option<McpClientService>) -> ServiceHolder {
         Self { name, running_service }
     }
 }
@@ -77,7 +74,7 @@ impl ServiceHolder {
 pub struct BackendTransportService {
     #[expect(dead_code, reason = "stored backend capabilities are kept with transport state for future routing")]
     capabilities: Option<ServerCapabilities>,
-    pub(crate) service: Option<Arc<RwLock<BackendService>>>,
+    pub(crate) service: Option<McpClientService>,
 }
 
 impl From<(&str, &str)> for BackendTransportKey {
@@ -92,8 +89,8 @@ impl From<(&String, &SessionId)> for BackendTransportKey {
     }
 }
 
-impl From<(Option<ServerCapabilities>, Option<Arc<RwLock<BackendService>>>)> for BackendTransportService {
-    fn from((capabilities, service): (Option<ServerCapabilities>, Option<Arc<RwLock<BackendService>>>)) -> Self {
+impl From<(Option<ServerCapabilities>, Option<McpClientService>)> for BackendTransportService {
+    fn from((capabilities, service): (Option<ServerCapabilities>, Option<McpClientService>)) -> Self {
         Self { capabilities, service }
     }
 }
@@ -179,7 +176,7 @@ where
                                 .map(|pi| pi.capabilities.clone()));
                 (
                     (name.clone(), server_capabilities.clone()),
-                    (name.clone(), BackendTransportService::from((server_capabilities, running_service.map(|rs| Arc::new(RwLock::new(rs)))))),
+                    (name.clone(), BackendTransportService::from((server_capabilities, running_service.map(Arc::new)))),
                 )
             })
             .unzip();
@@ -226,7 +223,7 @@ where
                 let request = request.clone();
                 async move {
                     if let Some(service) = service_holder.running_service {
-                        let service = service.read().await;
+                        //let service = service.read().await;
                         let response = service.list_tools(request).await;
                         (service_holder.name, Some(response))
                     } else {
@@ -293,7 +290,7 @@ where
                     request.name = tool_name.to_owned().into();
                         async move {
                             if let Some(service) = service_holder.running_service {
-                                let service = service.read().await;
+//                                let service = service.read().await;
                                 let response = service.call_tool(request).await;
 
                                 (service_holder.name, Some(response))
@@ -359,7 +356,7 @@ where
                 let request = request.clone();
                 async move {
                     if let Some(service) = service_holder.running_service {
-                        let service = service.read().await;
+                        //let service = service.read().await;
                         let response = service.list_resources(request).await;
                         (service_holder.name, Some(response))
                     } else {
@@ -428,7 +425,7 @@ where
                     request.uri = String::from(resource_uri);
                         async move {
                             if let Some(service) = service_holder.running_service {
-                                let service = service.read().await;
+                                //let service = service.read().await;
                                 let response = service.read_resource(request).await;
 
                                 (service_holder.name, Some(response))

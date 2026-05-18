@@ -16,7 +16,7 @@ use http::{HeaderMap, HeaderValue};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use rmcp::{
     ServiceExt,
-    model::InitializeRequestParams,
+    model::{CallToolRequestParams, InitializeRequestParams},
     transport::{
         StreamableHttpClientTransport, StreamableHttpServerConfig, StreamableHttpService,
         streamable_http_client::StreamableHttpClientTransportConfig,
@@ -312,6 +312,96 @@ async fn plaintext_list_tools_end_to_end_test() -> crate::Result<()> {
         if expected_tool_names != names {
             warn!("Actual {names:#?} Expected {expected_tool_names:#?}");
             return Err("Expected tool names don't match actual".into());
+        }
+
+        Ok(())
+    }
+    .boxed();
+
+    let maybe_passed = test_future.await;
+
+    handle.abort();
+    if maybe_passed.is_ok() {
+        info!("Test passed");
+    } else {
+        info!("Test NOT passed {maybe_passed:?}");
+        panic!()
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[test_log::test]
+async fn plaintext_overlapped_counter_tools_end_to_end_test() -> crate::Result<()> {
+    let gateway_port = create_ports(1)[0];
+
+    let config = Config {
+        address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
+        token_verification_public_key: "../../assets/jwt.key.pub".into(),
+        upstream_connection_mode: Some(crate::common::UpstreamConnectionMode::PlainTextOrTls),
+        ..Default::default()
+    };
+
+    let user = "admin@example.com";
+
+    let Ok(TestSettings { handle, gateway_url, expected_tool_names }) =
+        create_gateway_with_four_counters(user, config).await
+    else {
+        panic!("Invalid configuration ");
+    };
+
+    let test_future: BoxFuture<'_, crate::Result<()>> = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut default_headers = HeaderMap::new();
+        let token = get_token(user.to_owned());
+        default_headers.insert(
+            http::header::AUTHORIZATION,
+            HeaderValue::from_str(format!("Bearer {token}").as_str()).expect("This should work"),
+        );
+        let client = reqwest::Client::builder().default_headers(default_headers).build().expect("This should work");
+
+        info!("Seding request to {gateway_url}");
+
+        let config = StreamableHttpClientTransportConfig::with_uri(gateway_url);
+        let transport = StreamableHttpClientTransport::with_client(client, config);
+        let request = InitializeRequestParams::default();
+
+        let maybe_service = request.serve(transport).await;
+        let Ok(running_service) = maybe_service else {
+            warn!("No Service {maybe_service:?}");
+            return Err("Couldn't get a service".into());
+        };
+
+        let increment_tool_name =
+            expected_tool_names.into_iter().find(|tn| tn.ends_with("increment")).expect("This should work");
+        let get_value_tool_name = increment_tool_name.replace("increment", "get_value");
+
+        let call_tool = CallToolRequestParams::new(increment_tool_name);
+
+        let tasks = (0..4).map(|_| async { running_service.call_tool(call_tool.clone()).await }).collect::<Vec<_>>();
+
+        let results = futures::future::join_all(tasks).await;
+        for result in results {
+            let Ok(_) = result else {
+                let msg = format!("Call tools returned error  {call_tool:?}");
+                warn!(msg);
+                return Err(msg.into());
+            };
+        }
+
+        let call_tool = CallToolRequestParams::new(get_value_tool_name);
+
+        let Ok(get_value_result) = running_service.call_tool(call_tool).await else {
+            let msg = "Call tools get value returned error";
+            warn!(msg);
+            return Err(msg.into());
+        };
+        info!("{get_value_result:?}");
+        let actual_value: usize = get_value_result.into_typed().expect("This should work");
+        if 4 != actual_value {
+            warn!("Wrong value for counters");
+            return Err("Wrong value for counters".into());
         }
 
         Ok(())
