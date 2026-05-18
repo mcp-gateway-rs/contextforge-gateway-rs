@@ -46,6 +46,8 @@ with_tools = []
 
 
 [dev-dependencies]
+contextforge-gateway-rs-cpex.workspace = true
+cpex-core.workspace = true
 openport = { version = "0.1.1", features = ["rand"] }
 test-log = "0.2.20"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
