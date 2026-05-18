@@ -14,13 +14,8 @@ rmcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
-tracing-appender.workspace = true
-tracing-opentelemetry.workspace = true
-tracing-subscriber.workspace = true
 tokio.workspace = true
-tokio-stream.workspace = true
 axum.workspace = true
-anyhow.workspace = true
 tower-http.workspace = true
 tower-layer.workspace = true
 tower.workspace = true
@@ -36,9 +31,6 @@ openid.workspace = true
 url.workspace = true
 rmp-serde.workspace = true
 async-trait.workspace = true
-http-body.workspace = true
-http-body-util.workspace = true
-bytes.workspace = true
 reqwest.workspace = true
 itertools.workspace = true
 uuid = { version = "1.23", features = ["v4"] }
@@ -59,8 +51,6 @@ with_tools = []
 
 [dev-dependencies]
 openport = { version = "0.1.1", features = ["rand"] }
-mockito = "1.7.2"
-axum-test = "20.0.0"
 test-log = "0.2.20"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 futures.workspace = true

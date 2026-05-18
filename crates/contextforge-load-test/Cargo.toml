@@ -13,7 +13,6 @@ repository.workspace = true
 
 [dependencies]
 goose = { git = "https://github.com/tag1consulting/goose" }
-log = "0.4.29"
 tokio.workspace = true
 http.workspace = true
 reqwest.workspace = true
