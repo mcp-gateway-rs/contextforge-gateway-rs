@@ -10,7 +10,7 @@ keywords.workspace = true
 arc-swap = "1.7"
 async-trait.workspace = true
 contextforge-gateway-rs-lib.workspace = true
-cpex-core = { git = "https://github.com/contextforge-org/contextforge-plugins-framework", rev = "5ae3f120eb9af227b4eac1804156cd463bcd4eee" }
+cpex-core.workspace = true
 redis.workspace = true
 rmcp.workspace = true
 rmp-serde.workspace = true
@@ -27,7 +27,6 @@ http.workspace = true
 jsonwebtoken.workspace = true
 openport = { version = "0.1.1", features = ["rand"] }
 reqwest.workspace = true
-tokio.workspace = true
 
 [lints]
 workspace = true
