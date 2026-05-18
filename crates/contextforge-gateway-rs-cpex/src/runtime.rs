@@ -1,7 +1,4 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
-};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use contextforge_gateway_rs_lib::{GatewayToolRuntime, RuntimeHookState, ToolPreCallResult};
@@ -25,13 +22,8 @@ use crate::{
     pipeline::{effective_post_result, effective_pre_args, log_pipeline_errors, plugin_denied_error},
 };
 
-#[derive(Clone)]
 pub(crate) struct GatewayPluginRuntime {
-    inner: Arc<PluginRuntimeInner>,
-}
-
-struct PluginRuntimeInner {
-    manager: Arc<PluginManager>,
+    manager: PluginManager,
     has_pre_hook: bool,
     has_post_hook: bool,
 }
@@ -49,23 +41,17 @@ fn next_tool_call_id() -> String {
 
 impl Default for GatewayPluginRuntime {
     fn default() -> Self {
-        Self {
-            inner: Arc::new(PluginRuntimeInner {
-                manager: Arc::new(PluginManager::default()),
-                has_pre_hook: false,
-                has_post_hook: false,
-            }),
-        }
+        Self { manager: PluginManager::default(), has_pre_hook: false, has_post_hook: false }
     }
 }
 
 impl GatewayPluginRuntime {
     pub(crate) async fn shutdown(&self) {
-        self.inner.manager.shutdown().await;
+        self.manager.shutdown().await;
     }
 
     pub(crate) fn has_post_hook(&self) -> bool {
-        self.inner.has_post_hook
+        self.has_post_hook
     }
 
     pub(crate) async fn from_config(
@@ -82,9 +68,8 @@ impl GatewayPluginRuntime {
             .any(|plugin| plugin.hooks.iter().any(|hook| hook == cmf_hook_names::TOOL_POST_INVOKE));
         let manager = PluginManager::from_config(config, factories)
             .map_err(|source| GatewayPluginRuntimeError::Configuration { hook: "config", source })?;
-        let manager = Arc::new(manager);
         manager.initialize().await.map_err(|source| GatewayPluginRuntimeError::Initialization { source })?;
-        Ok(Self { inner: Arc::new(PluginRuntimeInner { manager, has_pre_hook, has_post_hook }) })
+        Ok(Self { manager, has_pre_hook, has_post_hook })
     }
 }
 
@@ -118,7 +103,6 @@ fn validate_gateway_supported_config(config: &CpexConfig) -> Result<(), GatewayP
 impl GatewayPluginRuntime {
     async fn invoke_tool_pre(&self, payload: MessagePayload) -> PipelineResult {
         let (result, background_tasks) = self
-            .inner
             .manager
             .invoke_named::<CmfHook>(cmf_hook_names::TOOL_PRE_INVOKE, payload, Extensions::default(), None)
             .await;
@@ -133,7 +117,6 @@ impl GatewayPluginRuntime {
         context_table: Option<PluginContextTable>,
     ) -> PipelineResult {
         let (result, background_tasks) = self
-            .inner
             .manager
             .invoke_named::<CmfHook>(cmf_hook_names::TOOL_POST_INVOKE, payload, Extensions::default(), context_table)
             .await;
@@ -148,7 +131,7 @@ impl GatewayPluginRuntime {
         tool_name: &str,
         backend_name: &str,
     ) -> Result<ToolPreCallResult, ErrorData> {
-        if !self.inner.has_pre_hook {
+        if !self.has_pre_hook {
             return Ok(ToolPreCallResult::unchanged());
         }
 
@@ -170,7 +153,7 @@ impl GatewayPluginRuntime {
         response: CallToolResult,
         state: Option<RuntimeHookState>,
     ) -> Result<CallToolResult, ErrorData> {
-        if !self.inner.has_post_hook {
+        if !self.has_post_hook {
             return Ok(response);
         }
 
