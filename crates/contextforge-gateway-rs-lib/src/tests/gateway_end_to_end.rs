@@ -104,15 +104,17 @@ async fn create_axum_tls_servers(ports: &[u16], router: axum::Router) -> Vec<Box
         .collect()
 }
 
-pub fn get_token(user_id: &str) -> String {
+pub fn get_token_for_claims(claims: &ContextForgeClaims) -> String {
     let key = EncodingKey::from_rsa_pem(&fs::read("../../assets/jwt.key").expect("Expecting this to work"))
         .expect("Expecting this to work");
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some("test".to_owned());
 
-    let claims = ContextForgeClaims::new(user_id);
+    encode::<ContextForgeClaims>(&header, claims, &key).expect("Expecting this to work")
+}
 
-    encode::<ContextForgeClaims>(&header, &claims, &key).expect("Expecting this to work")
+pub fn get_token(user_id: &str) -> String {
+    get_token_for_claims(&ContextForgeClaims::new(user_id))
 }
 
 struct TestSettings {
@@ -161,7 +163,6 @@ async fn create_gateway_with_four_counters(user: &str, config: Config) -> crate:
 
     let gateway = Gateway::builder()
         .with_config(config.clone())
-        //.with_user_config_store(Arc::new(mocked_user_config_store))
         .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_user_config_store_type(crate::UserConfigStoreType::Test(Arc::new(mocked_user_config_store)))
         .build();
