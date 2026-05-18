@@ -58,6 +58,8 @@ with_tools = []
 
 
 [dev-dependencies]
+contextforge-gateway-rs-cpex.workspace = true
+cpex-core.workspace = true
 openport = { version = "0.1.1", features = ["rand"] }
 mockito = "1.7.2"
 axum-test = "20.0.0"
