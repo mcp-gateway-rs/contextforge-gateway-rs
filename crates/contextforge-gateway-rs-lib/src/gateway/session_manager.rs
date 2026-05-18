@@ -34,21 +34,21 @@ impl<'a> SessionManager<'a> {
             .filter_map(|name| {
                 transports
                     .get_mut(&BackendTransportKey::from((&name, self.session_id)))
-                    .map(|b| ServiceHolder::new(name, b.service.take()))
+                    .map(|b| ServiceHolder::new(name, b.service.clone()))
             })
             .collect()
     }
 
-    pub async fn return_transports(&self, backend_transports: impl Iterator<Item = ServiceHolder>) {
-        let backend_transports = backend_transports.collect::<Vec<_>>();
-        info!("Returning transports {:?} {backend_transports:?}", self.session_id);
-        let mut transports = self.transports.lock().await;
-        for svc_holder in backend_transports {
-            transports
-                .entry(BackendTransportKey::from((&svc_holder.name, self.session_id)))
-                .and_modify(|e| e.service = svc_holder.running_service);
-        }
-    }
+    // pub async fn return_transports(&self, backend_transports: impl Iterator<Item = ServiceHolder>) {
+    //     let backend_transports = backend_transports.collect::<Vec<_>>();
+    //     info!("Returning transports {:?} {backend_transports:?}", self.session_id);
+    //     let mut transports = self.transports.lock().await;
+    //     for svc_holder in backend_transports {
+    //         transports
+    //             .entry(BackendTransportKey::from((&svc_holder.name, self.session_id)))
+    //             .and_modify(|e| e.service = svc_holder.running_service);
+    //     }
+    // }
 
     pub async fn cleanup_backends(&self, reason: &'static str) {
         let names: Vec<_> = self.virtual_host.backends.keys().cloned().collect();

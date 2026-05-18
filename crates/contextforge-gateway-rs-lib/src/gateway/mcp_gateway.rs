@@ -19,7 +19,7 @@ use rmcp::{
     service::{RequestContext, RunningService},
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 use typed_builder::TypedBuilder;
 
@@ -61,13 +61,13 @@ pub type BackendService = RunningService<RoleClient, InitializeRequestParams>;
 #[derive(Debug)]
 pub struct ServiceHolder {
     pub name: String,
-    pub running_service: Option<RunningService<RoleClient, InitializeRequestParams>>,
+    pub running_service: Option<Arc<RwLock<RunningService<RoleClient, InitializeRequestParams>>>>,
 }
 
 impl ServiceHolder {
     pub fn new(
         name: String,
-        running_service: Option<RunningService<RoleClient, InitializeRequestParams>>,
+        running_service: Option<Arc<RwLock<RunningService<RoleClient, InitializeRequestParams>>>>,
     ) -> ServiceHolder {
         Self { name, running_service }
     }
@@ -77,7 +77,7 @@ impl ServiceHolder {
 pub struct BackendTransportService {
     #[expect(dead_code, reason = "stored backend capabilities are kept with transport state for future routing")]
     capabilities: Option<ServerCapabilities>,
-    pub(crate) service: Option<BackendService>,
+    pub(crate) service: Option<Arc<RwLock<BackendService>>>,
 }
 
 impl From<(&str, &str)> for BackendTransportKey {
@@ -92,13 +92,9 @@ impl From<(&String, &SessionId)> for BackendTransportKey {
     }
 }
 
-impl From<(Option<ServerCapabilities>, Option<BackendService>)> for BackendTransportService {
-    fn from((capabilities, service): (Option<ServerCapabilities>, Option<BackendService>)) -> Self {
-        if let Some(service) = service {
-            Self { capabilities, service: Some(service) }
-        } else {
-            Self { capabilities, service: None }
-        }
+impl From<(Option<ServerCapabilities>, Option<Arc<RwLock<BackendService>>>)> for BackendTransportService {
+    fn from((capabilities, service): (Option<ServerCapabilities>, Option<Arc<RwLock<BackendService>>>)) -> Self {
+        Self { capabilities, service }
     }
 }
 
@@ -183,7 +179,7 @@ where
                                 .map(|pi| pi.capabilities.clone()));
                 (
                     (name.clone(), server_capabilities.clone()),
-                    (name.clone(), BackendTransportService::from((server_capabilities, running_service))),
+                    (name.clone(), BackendTransportService::from((server_capabilities, running_service.map(|rs| Arc::new(RwLock::new(rs)))))),
                 )
             })
             .unzip();
@@ -230,31 +226,25 @@ where
                 let request = request.clone();
                 async move {
                     if let Some(service) = service_holder.running_service {
+                        let service = service.read().await;
                         let response = service.list_tools(request).await;
-                        (service_holder.name, Some(service), Some(response))
+                        (service_holder.name, Some(response))
                     } else {
-                        (service_holder.name, None, None)
+                        (service_holder.name, None)
                     }
                 }
             })
             .collect::<Vec<_>>();
 
-        let list_tools_tasks_results: Vec<(String, Option<_>, Option<_>)> =
-            futures::future::join_all(list_tools_tasks).await;
+        let list_tools_tasks_results: Vec<(String, Option<_>)> = futures::future::join_all(list_tools_tasks).await;
 
-        let (backend_services, responses): (Vec<_>, Vec<_>) = list_tools_tasks_results
+        let responses: Vec<_> = list_tools_tasks_results
             .into_iter()
-            .map(|(name, service, response)| {
+            .map(|(name, response)| {
                 info!("list_tools: backend {name} {response:?}");
-                ((name.clone(), service), (name, response))
+                (name, response)
             })
-            .unzip();
-
-        let mut transports = self.transports.lock().await;
-        for (name, svc) in backend_services {
-            transports.entry(BackendTransportKey::from((&name, session_id))).and_modify(|e| e.service = svc);
-        }
-        drop(transports);
+            .collect();
 
         let responses = responses
             .into_iter()
@@ -290,37 +280,32 @@ where
         let backend_transports = session_manager.borrow_transports().await;
         info!("Borrowed transports {session_id:?} {backend_transports:?}");
 
-        let (services, call_tool_tasks): (Vec<_>, Vec<_>) = backend_transports
+        let call_tool_tasks: Vec<_> = backend_transports
             .into_iter()
-            .map(|service_holder| {
+            .filter_map(|service_holder| {
                 debug!(
                     "call_tool: Finding backend for {} {service_holder:?} {backend_name} tool_name = {tool_name}",
                     &request.name,
 
                 );
-                if service_holder.name == backend_name {
+                (service_holder.name == backend_name).then(|| {
                     let mut request = request.clone();
                     request.name = tool_name.to_owned().into();
-                    (
-                        None,
-                        Some(async move {
+                        async move {
                             if let Some(service) = service_holder.running_service {
+                                let service = service.read().await;
                                 let response = service.call_tool(request).await;
 
-                                (service_holder.name, Some(service), Some(response))
+                                (service_holder.name, Some(response))
                             } else {
                                 warn!("call_tool: trying to call a tool for which we have no backend {service_holder:?} {backend_name} tool_name = {tool_name}");
-                                (service_holder.name, None, None)
+                                (service_holder.name, None)
                             }
-                        }),
-                    )
-                } else {
-                    (Some(service_holder), None)
-                }
-            })
-            .unzip();
+                        }
 
-        let call_tool_tasks = call_tool_tasks.into_iter().flatten().collect::<Vec<_>>();
+                })
+            }).collect();
+
         if call_tool_tasks.len() > 1 {
             warn!("call_tool: More than one tool matching for tool name {}", request.name);
 
@@ -333,18 +318,15 @@ where
             });
         }
 
-        let call_tool_tasks_results: Vec<(String, Option<_>, Option<_>)> =
-            futures::future::join_all(call_tool_tasks).await;
+        let call_tool_tasks_results: Vec<(String, Option<_>)> = futures::future::join_all(call_tool_tasks).await;
 
-        let (backend_services, responses): (Vec<_>, Vec<_>) = call_tool_tasks_results
+        let responses: Vec<_> = call_tool_tasks_results
             .into_iter()
-            .map(|(name, service, response)| {
+            .map(|(name, response)| {
                 info!("call_tool: backend {name} {response:?}");
-                (ServiceHolder::new(name.clone(), service), (name, response))
+                (name, response)
             })
-            .unzip();
-
-        session_manager.return_transports(backend_services.into_iter().chain(services.into_iter().flatten())).await;
+            .collect();
 
         let responses = responses
             .into_iter()
@@ -377,31 +359,25 @@ where
                 let request = request.clone();
                 async move {
                     if let Some(service) = service_holder.running_service {
+                        let service = service.read().await;
                         let response = service.list_resources(request).await;
-                        (service_holder.name, Some(service), Some(response))
+                        (service_holder.name, Some(response))
                     } else {
-                        (service_holder.name, None, None)
+                        (service_holder.name, None)
                     }
                 }
             })
             .collect::<Vec<_>>();
 
-        let list_tools_tasks_results: Vec<(String, Option<_>, Option<_>)> =
-            futures::future::join_all(list_resources_tasks).await;
+        let list_tools_tasks_results: Vec<(String, Option<_>)> = futures::future::join_all(list_resources_tasks).await;
 
-        let (backend_services, responses): (Vec<_>, Vec<_>) = list_tools_tasks_results
+        let responses: Vec<_> = list_tools_tasks_results
             .into_iter()
-            .map(|(name, service, response)| {
+            .map(|(name, response)| {
                 info!("list_resources: backend {name} {response:?}");
-                ((name.clone(), service), (name, response))
+                (name, response)
             })
-            .unzip();
-
-        let mut transports = self.transports.lock().await;
-        for (name, svc) in backend_services {
-            transports.entry(BackendTransportKey::from((&name, session_id))).and_modify(|e| e.service = svc);
-        }
-        drop(transports);
+            .collect();
 
         let responses = responses
             .into_iter()
@@ -439,7 +415,7 @@ where
         let backend_transports = session_manager.borrow_transports().await;
         info!("Borrowed transports {session_id:?} {backend_transports:?}");
 
-        let (services, call_tool_tasks): (Vec<_>, Vec<_>) = backend_transports
+        let call_tool_tasks: Vec<_> = backend_transports
             .into_iter()
             .map(|service_holder| {
                 debug!(
@@ -447,27 +423,22 @@ where
                     &request.uri,
 
                 );
-                if service_holder.name == backend_name {
+                (service_holder.name == backend_name).then(|| {
                     let mut request = request.clone();
                     request.uri = String::from(resource_uri);
-                    (
-                        None,
-                        Some(async move {
+                        async move {
                             if let Some(service) = service_holder.running_service {
+                                let service = service.read().await;
                                 let response = service.read_resource(request).await;
 
-                                (service_holder.name, Some(service), Some(response))
+                                (service_holder.name, Some(response))
                             } else {
                                 warn!("call_tool: trying to call a tool for which we have no backend {service_holder:?} {backend_name} resource_name = {resource_uri}");
-                                (service_holder.name, None, None)
+                                (service_holder.name, None)
                             }
-                        }),
-                    )
-                } else {
-                    (Some(service_holder), None)
-                }
-            })
-            .unzip();
+                        }
+                })
+            }).collect();
 
         let call_tool_tasks = call_tool_tasks.into_iter().flatten().collect::<Vec<_>>();
         if call_tool_tasks.len() > 1 {
@@ -482,18 +453,15 @@ where
             });
         }
 
-        let call_tool_tasks_results: Vec<(String, Option<_>, Option<_>)> =
-            futures::future::join_all(call_tool_tasks).await;
+        let call_tool_tasks_results: Vec<_> = futures::future::join_all(call_tool_tasks).await;
 
-        let (backend_services, responses): (Vec<_>, Vec<_>) = call_tool_tasks_results
+        let responses: Vec<_> = call_tool_tasks_results
             .into_iter()
-            .map(|(name, service, response)| {
+            .map(|(name, response)| {
                 info!("read_resource: backend {name} {response:?}");
-                (ServiceHolder::new(name.clone(), service), (name, response))
+                (name, response)
             })
-            .unzip();
-
-        session_manager.return_transports(backend_services.into_iter().chain(services.into_iter().flatten())).await;
+            .collect();
 
         let responses = responses
             .into_iter()
