@@ -25,15 +25,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let runtime = runtime::Runtime::from(&config);
 
-    let redis_client = RedisClient::try_from(RedisConfig::try_from(&config)?)?;
-    let plugin_runtime = CpexRuntimeRegistry::with_redis_config(redis_client);
-    #[cfg(feature = "test-plugins")]
-    let plugin_runtime = {
-        let mut plugin_runtime = plugin_runtime;
-        test_plugins::register(&mut plugin_runtime)?;
-        plugin_runtime
+    let plugin_runtime = if config.runtime_plugins_enabled.unwrap_or(false) {
+        Some(Arc::new(plugin_runtime_from_config(&config)?))
+    } else {
+        None
     };
-    let plugin_runtime = Arc::new(plugin_runtime);
     let gateway = Gateway::builder()
         .with_config(config)
         .with_user_config_store_type(UserConfigStoreType::Redis)
@@ -42,4 +38,18 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .build();
 
     runtime.execute(gateway)
+}
+
+fn plugin_runtime_from_config(
+    config: &Config,
+) -> Result<CpexRuntimeRegistry, Box<dyn std::error::Error + Send + Sync>> {
+    let redis_client = RedisClient::try_from(RedisConfig::try_from(config)?)?;
+    let plugin_runtime = CpexRuntimeRegistry::with_redis_config(redis_client);
+    #[cfg(feature = "test-plugins")]
+    let plugin_runtime = {
+        let mut plugin_runtime = plugin_runtime;
+        test_plugins::register(&mut plugin_runtime)?;
+        plugin_runtime
+    };
+    Ok(plugin_runtime)
 }

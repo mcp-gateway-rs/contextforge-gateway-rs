@@ -201,10 +201,14 @@ async fn start_gateway_with_runtime(
         })
         .with_session_manager(Arc::new(LocalSessionManager::default()))
         .with_user_config_store_type(UserConfigStoreType::Test(Arc::new(user_store)))
-        .with_plugin_runtime(plugin_runtime)
+        .with_plugin_runtime(runtime_plugins_enabled.then_some(plugin_runtime))
         .build();
 
-    let gateway = async move { gateway.run_gateway().await }.boxed();
+    let gateway = async move {
+        let gateway = gateway.initialize_plugin_runtime().await?;
+        gateway.run_gateway().await
+    }
+    .boxed();
     let backend = async move {
         axum::serve(backend_listener, backend_router).await.expect("backend serves");
         Ok(())
