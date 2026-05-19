@@ -66,6 +66,7 @@ impl Runtime {
             self.configure_builder(&mut builder, self.thread_name.clone());
             let runtime = builder.build()?;
             runtime.block_on(async {
+                let gateway = gateway.initialize_plugin_runtime().await?;
                 tokio::select! {
                     res = gateway.run_gateway() =>
                         if res.is_ok(){
@@ -74,8 +75,8 @@ impl Runtime {
                             error!("Gateway process terminated {res:?}");
                         }
                 }
-            });
-            Ok(())
+                Ok(())
+            })
         } else {
             let handles = (0..self.number_of_threads)
                 .map(|i| {
@@ -85,13 +86,16 @@ impl Runtime {
                         let mut builder = Builder::new_current_thread();
 
                         Self::configure_single_thread_builder(&mut builder, format!("{thread_name}{i}"));
-                        let maybe_runtime = builder.build_local(LocalOptions::default());
-                        let Ok(runtime) = maybe_runtime else {
-                            warn!("Can't build thread {maybe_runtime:?}");
-                            return Err(maybe_runtime.err());
+                        let runtime = match builder.build_local(LocalOptions::default()) {
+                            Ok(runtime) => runtime,
+                            Err(error) => {
+                                warn!("Can't build thread {error:?}");
+                                return Err::<(), contextforge_gateway_rs_lib::Error>(error.into());
+                            },
                         };
 
                         runtime.block_on(async {
+                            let gateway = gateway.initialize_plugin_runtime().await?;
                             tokio::select! {
                                 res = gateway.run_gateway() =>
                                     if res.is_ok(){
@@ -100,8 +104,8 @@ impl Runtime {
                                         error!("Gateway process terminated {res:?}");
                                     }
                             }
-                        });
-                        Ok(())
+                            Ok::<(), contextforge_gateway_rs_lib::Error>(())
+                        })
                     })
                 })
                 .collect::<Vec<_>>();

@@ -52,11 +52,18 @@ pub struct Gateway {
     config: Config,
     session_manager: Arc<LocalSessionManager>,
     user_config_store_type: UserConfigStoreType,
-    #[builder(default, setter(strip_option))]
+    #[builder(default)]
     plugin_runtime: Option<Arc<contextforge_gateway_rs_cpex::CpexRuntimeRegistry>>,
 }
 
 impl Gateway {
+    pub async fn initialize_plugin_runtime(self) -> Result<Self> {
+        if let Some(plugin_runtime) = &self.plugin_runtime {
+            plugin_runtime.initialize().await?;
+        }
+        Ok(self)
+    }
+
     pub async fn run_gateway(self) -> Result<()> {
         let config = &self.config;
         let session_manager = self.session_manager;
@@ -65,19 +72,9 @@ impl Gateway {
             UserConfigStoreType::Test(store) => store,
         };
         let user_config_store = user_config_store as Arc<dyn UserConfigStore + Send + Sync>;
-        let runtime_plugins_enabled = config.runtime_plugins_enabled.unwrap_or(false);
 
         let user_session_store = LocalUserSessionStore::new();
-        let plugin_runtime = self.plugin_runtime;
-        let mcp_plugin_runtime = if runtime_plugins_enabled {
-            let Some(plugin_runtime) = plugin_runtime else {
-                return Err("runtime plugins enabled without plugin runtime".into());
-            };
-            plugin_runtime.initialize().await?;
-            Some(plugin_runtime)
-        } else {
-            None
-        };
+        let mcp_plugin_runtime = self.plugin_runtime;
 
         let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
 
