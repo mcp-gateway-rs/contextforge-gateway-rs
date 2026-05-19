@@ -57,13 +57,6 @@ pub struct Gateway {
 }
 
 impl Gateway {
-    pub async fn initialize_plugin_runtime(self) -> Result<(Self, Option<tokio::task::JoinHandle<()>>)> {
-        if let Some(plugin_runtime) = self.plugin_runtime.clone() {
-            return Ok((self, plugin_runtime.initialize().await?));
-        }
-        Ok((self, None))
-    }
-
     pub async fn run_gateway(self) -> Result<()> {
         let config = &self.config;
         let session_manager = self.session_manager;

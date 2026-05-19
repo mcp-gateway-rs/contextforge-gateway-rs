@@ -1,6 +1,11 @@
-use std::thread;
+use std::{sync::Arc, thread};
 
+use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use contextforge_gateway_rs_lib::{Config, Gateway};
+use futures::{
+    FutureExt,
+    future::{BoxFuture, join_all},
+};
 use tokio::runtime::{Builder, LocalOptions};
 use tracing::{debug, error, info, warn};
 
@@ -60,28 +65,23 @@ impl Runtime {
         builder.enable_all().name(thread_name).global_queue_interval(1024).max_io_events_per_tick(4);
     }
 
-    pub fn execute(self, gateway: Gateway) -> contextforge_gateway_rs_lib::Result<()> {
+    pub fn execute(
+        self,
+        gateway: Gateway,
+        cpex_runtime: Option<Arc<CpexRuntimeRegistry>>,
+    ) -> contextforge_gateway_rs_lib::Result<()> {
         if self.single_runtime {
             let mut builder = Builder::new_multi_thread();
             self.configure_builder(&mut builder, self.thread_name.clone());
             let runtime = builder.build()?;
-            runtime.block_on(async {
-                let (gateway, _plugin_watcher_handle) = gateway.initialize_plugin_runtime().await?;
-                tokio::select! {
-                    res = gateway.run_gateway() =>
-                        if res.is_ok(){
-                            debug!("Gateway process terminated");
-                        }else{
-                            error!("Gateway process terminated {res:?}");
-                        }
-                }
-                Ok(())
-            })
+
+            runtime.block_on(async { Self::initialize(gateway, cpex_runtime).await })
         } else {
             let handles = (0..self.number_of_threads)
                 .map(|i| {
                     let thread_name = self.thread_name.clone();
                     let gateway = gateway.clone();
+                    let cpex_runtime = cpex_runtime.clone();
                     thread::Builder::new().name("contextforge-gateway-rs-{i}".to_owned()).spawn(move || {
                         let mut builder = Builder::new_current_thread();
 
@@ -94,18 +94,7 @@ impl Runtime {
                             },
                         };
 
-                        runtime.block_on(async {
-                            let (gateway, _plugin_watcher_handle) = gateway.initialize_plugin_runtime().await?;
-                            tokio::select! {
-                                res = gateway.run_gateway() =>
-                                    if res.is_ok(){
-                                        debug!("Gateway process terminated");
-                                    }else{
-                                        error!("Gateway process terminated {res:?}");
-                                    }
-                            }
-                            Ok::<(), contextforge_gateway_rs_lib::Error>(())
-                        })
+                        runtime.block_on(async { Self::initialize(gateway, cpex_runtime).await })
                     })
                 })
                 .collect::<Vec<_>>();
@@ -120,5 +109,44 @@ impl Runtime {
             }
             Ok(())
         }
+    }
+
+    fn initialize(
+        gateway: Gateway,
+        cpex_runtime: Option<Arc<CpexRuntimeRegistry>>,
+    ) -> BoxFuture<'static, contextforge_gateway_rs_lib::Result<()>> {
+        async {
+            if let Some(cpex_runtime) = cpex_runtime {
+                let handle = cpex_runtime.initialize().await;
+                match handle {
+                    Ok(Some(_runtime_handle)) => {
+                        debug!("CPEX Plugins initialization successful");
+                    },
+                    Ok(None) => {
+                        debug!("CPEX Plugins initialization skipped??");
+                    },
+                    Err(e) => {
+                        error!("CPEX Plugins initialization failed {e:?}");
+                        return Err(e);
+                    },
+                }
+            }
+
+            let _ = join_all(vec![
+                async {
+                    let res = gateway.run_gateway().await;
+                    if res.is_ok() {
+                        debug!("Gateway process terminated");
+                    } else {
+                        error!("Gateway process terminated {res:?}");
+                    }
+                }
+                .boxed(),
+            ])
+            .await;
+
+            Ok(())
+        }
+        .boxed()
     }
 }

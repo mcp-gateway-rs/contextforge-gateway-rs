@@ -30,14 +30,15 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     } else {
         None
     };
+
     let gateway = Gateway::builder()
         .with_config(config)
         .with_user_config_store_type(UserConfigStoreType::Redis)
         .with_session_manager(Arc::new(LocalSessionManager::default()))
-        .with_plugin_runtime(plugin_runtime)
+        .with_plugin_runtime(plugin_runtime.clone())
         .build();
 
-    runtime.execute(gateway)
+    runtime.execute(gateway, plugin_runtime)
 }
 
 fn plugin_runtime_from_config(

@@ -205,7 +205,7 @@ async fn start_gateway_with_runtime(
         .build();
 
     let gateway = async move {
-        let (gateway, _plugin_watcher_handle) = gateway.initialize_plugin_runtime().await?;
+        //        let (gateway, _plugin_watcher_handle) = gateway.initialize_plugin_runtime().await?;
         gateway.run_gateway().await
     }
     .boxed();
