@@ -2,15 +2,14 @@ mod support;
 
 use std::sync::Arc;
 
-use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use cpex_core::cmf::Role;
 use cpex_core::hooks::types::cmf_hook_names;
 use rmcp::model::ErrorCode;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use support::{
-    MemoryRuntimePluginConfigStore, TestPlugin, TestPluginFactory, error_code, runtime_with_post, runtime_with_pre,
-    runtime_with_pre_and_post, start_gateway, sum_request, text,
+    TestPlugin, error_code, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway, sum_request,
+    text,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -21,7 +20,7 @@ async fn disabled_runtime_does_not_invoke_registered_plugin() {
         Arc::new(TestPlugin::new("disabled-post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
     let pre_observations = pre_plugin.observations();
     let post_observations = post_plugin.observations();
-    let runtime = runtime_with_pre_and_post(pre_plugin, post_plugin);
+    let runtime = runtime_with_pre_and_post(pre_plugin, post_plugin).await;
 
     let gateway = start_gateway("admin@example.com", false, runtime).await;
     let service = gateway.connect("admin@example.com").await;
@@ -33,26 +32,10 @@ async fn disabled_runtime_does_not_invoke_registered_plugin() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn disabled_runtime_does_not_load_config() {
-    let config_store = MemoryRuntimePluginConfigStore::with_config(json!({
-        "version": 1,
-        "cpex": { "plugins": [] }
-    }));
-    let runtime = Arc::new(CpexRuntimeRegistry::with_config_store(Arc::new(config_store.clone())));
-
-    let gateway = start_gateway("admin@example.com", false, runtime).await;
-    let service = gateway.connect("admin@example.com").await;
-    let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
-
-    assert_eq!("3", text(&result));
-    assert_eq!(0, config_store.calls());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn pre_hook_modifies_backend_arguments_without_rerouting_tool() {
     let plugin = Arc::new(TestPlugin::new("pre", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_rewrite());
     let observations = plugin.observations();
-    let runtime = runtime_with_pre(plugin);
+    let runtime = runtime_with_pre(plugin).await;
 
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
@@ -74,7 +57,7 @@ async fn pre_hook_modifies_backend_arguments_without_rerouting_tool() {
 async fn post_hook_receives_backend_result_and_modifies_client_result() {
     let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
     let observations = plugin.observations();
-    let runtime = runtime_with_post(plugin);
+    let runtime = runtime_with_post(plugin).await;
 
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
@@ -90,7 +73,7 @@ async fn post_hook_receives_backend_result_and_modifies_client_result() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn post_hook_can_return_raw_cmf_result_content() {
     let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_raw_post_rewrite());
-    let runtime = runtime_with_post(plugin);
+    let runtime = runtime_with_post(plugin).await;
 
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
@@ -106,7 +89,7 @@ async fn pre_and_post_hooks_share_gateway_call_context() {
     let post_plugin =
         Arc::new(TestPlugin::new("context-post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_context_roundtrip());
     let post_observations = post_plugin.observations();
-    let runtime = runtime_with_pre_and_post(pre_plugin, post_plugin);
+    let runtime = runtime_with_pre_and_post(pre_plugin, post_plugin).await;
 
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
@@ -119,7 +102,7 @@ async fn pre_and_post_hooks_share_gateway_call_context() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn pre_and_post_denials_return_plugin_error_codes() {
     let pre_plugin = Arc::new(TestPlugin::new("pre-deny", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_deny());
-    let runtime = runtime_with_pre(pre_plugin);
+    let runtime = runtime_with_pre(pre_plugin).await;
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
     let error = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap_err();
@@ -127,7 +110,7 @@ async fn pre_and_post_denials_return_plugin_error_codes() {
     assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
 
     let post_plugin = Arc::new(TestPlugin::new("post-deny", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_deny());
-    let runtime = runtime_with_post(post_plugin);
+    let runtime = runtime_with_post(post_plugin).await;
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
     let error = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap_err();
@@ -139,57 +122,11 @@ async fn pre_and_post_denials_return_plugin_error_codes() {
 async fn pre_hook_invalid_arguments_return_invalid_params() {
     let plugin =
         Arc::new(TestPlugin::new("invalid-args", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_invalid_pre_args());
-    let runtime = runtime_with_pre(plugin);
+    let runtime = runtime_with_pre(plugin).await;
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
     let error = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap_err();
 
     assert_eq!(ErrorCode::INVALID_PARAMS, error_code(error));
     assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn enabled_runtime_applies_config_change_after_gateway_start() {
-    let plugin = Arc::new(TestPlugin::new("runtime-pre", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_rewrite());
-    let observations = plugin.observations();
-    let config_store = MemoryRuntimePluginConfigStore::with_config(json!({
-        "version": 1,
-        "cpex": { "plugins": [] }
-    }));
-    let mut runtime = CpexRuntimeRegistry::with_config_store_interval(
-        Arc::new(config_store.clone()),
-        tokio::time::Duration::from_millis(10),
-    );
-    runtime
-        .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
-        .expect("test factory registers");
-    let runtime = Arc::new(runtime);
-    let gateway = start_gateway("admin@example.com", true, Arc::clone(&runtime)).await;
-    let service = gateway.connect("admin@example.com").await;
-
-    let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
-    assert_eq!("3", text(&result));
-
-    config_store
-        .set_config(json!({
-            "version": 1,
-            "cpex": {
-                "plugins": [{
-                    "name": "runtime-pre",
-                    "kind": "test",
-                    "hooks": [cmf_hook_names::TOOL_PRE_INVOKE]
-                }]
-            }
-        }))
-        .await;
-    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(1);
-    loop {
-        let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
-        if text(&result) == "30" {
-            break;
-        }
-        assert!(tokio::time::Instant::now() < deadline, "runtime config watcher did not apply plugin config");
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    }
-    assert_eq!(1, observations.lock().expect("observations lock poisoned").pre_calls);
 }

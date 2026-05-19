@@ -11,7 +11,7 @@ use crate::error::GatewayPluginRuntimeError;
 const RUNTIME_PLUGIN_CONFIG_KEY: &str = "ContextForgeGatewayRuntimePluginConfig";
 
 #[async_trait]
-pub trait RuntimePluginConfigStore: Send + Sync {
+pub(crate) trait RuntimePluginConfigStore: Send + Sync {
     async fn get_config(&self) -> Result<Option<serde_json::Value>, GatewayPluginRuntimeError>;
 }
 
@@ -29,13 +29,13 @@ pub(crate) fn cpex_config_from_document(
     }
 }
 
-pub struct RedisRuntimePluginConfigStore {
+pub(crate) struct RedisRuntimePluginConfigStore {
     redis_client: Client,
     connection: Mutex<Option<ConnectionManager>>,
 }
 
 impl RedisRuntimePluginConfigStore {
-    pub fn new(redis_client: Client) -> Self {
+    pub(crate) fn new(redis_client: Client) -> Self {
         Self { redis_client, connection: Mutex::new(None) }
     }
 
