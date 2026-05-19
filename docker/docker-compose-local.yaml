@@ -118,8 +118,8 @@ services:
       # - "--tls-ca-cert-file"
       # - "/tls_config/contextforge.intermediate.cert.pem"
     ports:
-      - "6380:6379"      # expose only if you want host access
-      - "16380:16379"      # expose only if you want host access
+      - "6379:6379"      # expose only if you want host access
+      - "16379:16379"      # expose only if you want host access
     volumes: 
       - ../assets/contextforgeCA/:/tls_config:z
     
