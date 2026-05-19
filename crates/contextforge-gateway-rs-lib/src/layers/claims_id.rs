@@ -74,13 +74,16 @@ pub async fn claims_layer(
 #[cfg(test)]
 mod test {
 
-    use std::sync::{Arc, Once};
+    use std::{
+        fs,
+        sync::{Arc, Once},
+    };
 
     use async_trait::async_trait;
     use axum::{Router, body::Body, middleware, response::Response, routing::get};
     use contextforge_gateway_rs_apis::{User, user_store::UserConfig};
     use http::{HeaderMap, Request, StatusCode};
-    use jsonwebtoken::{DecodingKey, Validation};
+    use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, encode};
     use tower::ServiceExt;
 
     use crate::{
@@ -88,11 +91,19 @@ mod test {
         common::{ContextForgeClaims, ContextForgeGatewayAppState, JwtTokenDecoders},
         const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
         layers::claims_id::claims_layer,
-        tests,
         user_config_store::{ConfigStoreError, UserConfigStore},
     };
 
     static CRYPTO: Once = Once::new();
+
+    fn get_token_for_claims(claims: &ContextForgeClaims) -> String {
+        let key = EncodingKey::from_rsa_pem(&fs::read("../../assets/jwt.key").expect("Expecting this to work"))
+            .expect("Expecting this to work");
+        let mut header = Header::new(Algorithm::RS256);
+        header.kid = Some("test".to_owned());
+
+        encode::<ContextForgeClaims>(&header, claims, &key).expect("Expecting this to work")
+    }
 
     struct MockedUserConfigStore;
     #[async_trait]
@@ -157,7 +168,7 @@ mod test {
 
         let mut claims = ContextForgeClaims::new("blah@blah.com");
         claims.exp = 0;
-        let token = tests::gateway_end_to_end::get_token_for_claims(&claims);
+        let token = get_token_for_claims(&claims);
 
         let mut validation = Validation::new(jsonwebtoken::Algorithm::RS256);
         validation.set_audience(&[CONTEXT_FORGE_GATEWAY_AUDIENCE]);

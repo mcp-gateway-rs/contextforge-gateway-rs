@@ -291,7 +291,6 @@ where
 
         let backend_transports = session_manager.borrow_transports().await;
         info!("Borrowed transports {session_id:?} {backend_transports:?}");
-        let mut services = Vec::new();
         let mut target_service = None;
         for service_holder in backend_transports {
             debug!(
@@ -309,13 +308,10 @@ where
                     });
                 }
                 target_service = Some(service_holder);
-            } else {
-                services.push(service_holder);
             }
         }
 
         let Some(mut target_service) = target_service else {
-            session_manager.return_transports(services.into_iter()).await;
             return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
                 message: "Routing problem... got no responses from backends".into(),
@@ -326,7 +322,6 @@ where
             warn!(
                 "call_tool: trying to call a tool for which we have no backend {target_service:?} {backend_name} tool_name = {tool_name}"
             );
-            session_manager.return_transports(services.into_iter().chain(std::iter::once(target_service))).await;
             return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
                 message: "Routing problem... got no responses from backends".into(),
@@ -336,11 +331,6 @@ where
 
         let service_name = target_service.name.clone();
         let response = service.call_tool(routed_request).await;
-        session_manager
-            .return_transports(
-                services.into_iter().chain(std::iter::once(ServiceHolder::new(service_name.clone(), Some(service)))),
-            )
-            .await;
         let response = response.map_err(|error| {
             warn!("call_tool: backend {service_name} {error:?}");
             ErrorData {

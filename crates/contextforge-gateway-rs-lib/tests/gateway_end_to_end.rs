@@ -242,7 +242,7 @@ async fn plaintext_list_tools_end_to_end_test() -> Result<()> {
 
     let config = Config {
         address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
-        token_verification_public_key: "../../assets/jwt.key.pub".into(),
+        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
         ..Default::default()
     };
@@ -320,7 +320,7 @@ async fn tls_list_tools_end_to_end_test() -> Result<()> {
         format!("127.0.0.1:{gateway_port}").parse().expect("This should work");
 
     let config = Config {
-        token_verification_public_key: "../../assets/jwt.key.pub".into(),
+        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
         upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
         tls_address: Some(server_socket_addr),
         server_private_key: Some("../../assets/contextforgeCA/contextforge-server.key.pem".into()),
