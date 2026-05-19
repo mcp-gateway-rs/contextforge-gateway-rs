@@ -66,7 +66,7 @@ impl Runtime {
             self.configure_builder(&mut builder, self.thread_name.clone());
             let runtime = builder.build()?;
             runtime.block_on(async {
-                let gateway = gateway.initialize_plugin_runtime().await?;
+                let (gateway, _plugin_watcher_handle) = gateway.initialize_plugin_runtime().await?;
                 tokio::select! {
                     res = gateway.run_gateway() =>
                         if res.is_ok(){
@@ -95,7 +95,7 @@ impl Runtime {
                         };
 
                         runtime.block_on(async {
-                            let gateway = gateway.initialize_plugin_runtime().await?;
+                            let (gateway, _plugin_watcher_handle) = gateway.initialize_plugin_runtime().await?;
                             tokio::select! {
                                 res = gateway.run_gateway() =>
                                     if res.is_ok(){

@@ -7,7 +7,6 @@ mod hooks;
 mod pipeline;
 mod runtime;
 
-pub use config::{RedisRuntimePluginConfigStore, RuntimePluginConfigStore};
 pub use error::GatewayPluginRuntimeError;
 pub use factory::CmfPluginFactory;
 pub use handle::CpexRuntimeRegistry;

@@ -40,10 +40,6 @@ fn next_tool_call_id() -> String {
 }
 
 impl GatewayPluginRuntime {
-    pub(crate) async fn shutdown(&self) {
-        self.manager.shutdown().await;
-    }
-
     pub(crate) fn has_post_hook(&self) -> bool {
         self.has_post_hook
     }
@@ -64,6 +60,20 @@ impl GatewayPluginRuntime {
             .map_err(|source| GatewayPluginRuntimeError::Configuration { hook: "config", source })?;
         manager.initialize().await.map_err(|source| GatewayPluginRuntimeError::Initialization { source })?;
         Ok(Self { manager, has_pre_hook, has_post_hook })
+    }
+}
+
+impl Drop for GatewayPluginRuntime {
+    fn drop(&mut self) {
+        let manager = std::mem::take(&mut self.manager);
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn(async move {
+                    manager.shutdown().await;
+                });
+            },
+            Err(error) => tracing::warn!(%error, "skipping CPEX plugin shutdown outside a Tokio runtime"),
+        }
     }
 }
 
