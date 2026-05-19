@@ -25,6 +25,7 @@ pub struct CpexRuntimeRegistry {
     config_store: Option<Arc<dyn RuntimePluginConfigStore>>,
     factories: Arc<PluginFactoryRegistry>,
     watcher_started: AtomicBool,
+    watcher_interval: Duration,
 }
 
 struct RegistryToolCallState {
@@ -39,6 +40,7 @@ impl Default for CpexRuntimeRegistry {
             config_store: None,
             factories: Arc::new(PluginFactoryRegistry::new()),
             watcher_started: AtomicBool::new(false),
+            watcher_interval: Duration::from_secs(2),
         }
     }
 }
@@ -50,6 +52,14 @@ impl CpexRuntimeRegistry {
 
     pub fn with_config_store(config_store: Arc<dyn RuntimePluginConfigStore>) -> Self {
         Self { config_store: Some(config_store), ..Self::default() }
+    }
+
+    #[doc(hidden)]
+    pub fn with_config_store_interval(
+        config_store: Arc<dyn RuntimePluginConfigStore>,
+        watcher_interval: Duration,
+    ) -> Self {
+        Self { config_store: Some(config_store), watcher_interval, ..Self::default() }
     }
 
     pub fn register_factory(
@@ -78,12 +88,16 @@ impl CpexRuntimeRegistry {
             return;
         }
 
-        let runtime = Arc::clone(&self.runtime);
+        let runtime = Arc::downgrade(&self.runtime);
         let factories = Arc::clone(&self.factories);
+        let watcher_interval = self.watcher_interval;
         tokio::spawn(async move {
             let mut last_applied_config = initial_config;
             loop {
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(watcher_interval).await;
+                let Some(runtime) = runtime.upgrade() else {
+                    break;
+                };
                 match config_store.get_config().await {
                     Ok(config) if config == last_applied_config => {},
                     Ok(config) => match apply_runtime_config(&runtime, &factories, config.clone()).await {
@@ -156,8 +170,12 @@ impl CpexRuntimeRegistry {
     ) -> Result<ToolPreCallResult, ErrorData> {
         let runtime = self.current();
         let mut result = runtime.before_tool_call(request, tool_name, backend_name).await?;
-        let state = if runtime.has_post_hook() { result.state } else { None };
-        result.state = Some(Box::new(RegistryToolCallState { runtime, state }));
+        if runtime.has_post_hook() {
+            let state = result.state.take();
+            result.state = Some(Box::new(RegistryToolCallState { runtime, state }));
+        } else {
+            result.state = None;
+        }
         Ok(result)
     }
 
@@ -169,7 +187,7 @@ impl CpexRuntimeRegistry {
     ) -> Result<CallToolResult, ErrorData> {
         match state.and_then(|state| state.downcast::<RegistryToolCallState>().ok()) {
             Some(state) => state.runtime.after_tool_call(tool_name, response, state.state).await,
-            None => self.current().after_tool_call(tool_name, response, None).await,
+            None => Ok(response),
         }
     }
 }
