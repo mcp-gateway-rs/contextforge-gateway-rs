@@ -34,7 +34,7 @@ rmcp = { version = "1.6.0", features = [
     "reqwest",
     "transport-streamable-http-client-reqwest",
     "elicitation",
-], git = "https://github.com/contextforge-gateway-rs/mcp-rust-sdk", rev="d07fa4f8d7978cd0829a09fab181437b99a81878" }
+], git = "https://github.com/contextforge-gateway-rs/mcp-rust-sdk", branch = "enabling_propagation_of_new_session_id_2", commit="d07fa4f8d7978cd0829a09fab181437b99a81878" }
 serde = {version= "1.0"}
 serde_json = "1.0"
 tracing = "0.1"
