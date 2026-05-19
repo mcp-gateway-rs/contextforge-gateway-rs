@@ -32,6 +32,11 @@ pub struct CpexRuntimeRegistry {
     watcher_interval: Duration,
 }
 
+#[derive(Clone)]
+pub struct GatewayPluginRuntimeHandle {
+    runtime: Arc<ArcSwap<GatewayPluginRuntime>>,
+}
+
 struct RegistryToolCallState {
     runtime: Arc<GatewayPluginRuntime>,
     state: Option<RuntimeHookState>,
@@ -72,8 +77,8 @@ impl CpexRuntimeRegistry {
         apply_runtime_config(&self.runtime, &self.factories, config).await
     }
 
-    fn current(&self) -> Arc<GatewayPluginRuntime> {
-        self.runtime.load_full()
+    pub fn handle(&self) -> GatewayPluginRuntimeHandle {
+        GatewayPluginRuntimeHandle { runtime: Arc::clone(&self.runtime) }
     }
 
     fn start_config_watcher(&self, initial_config: Option<serde_json::Value>) -> Option<JoinHandle<()>> {
@@ -656,6 +661,24 @@ impl CpexRuntimeRegistry {
     fn with_config_store_interval(config_store: Arc<dyn RuntimePluginConfigStore>, watcher_interval: Duration) -> Self {
         Self { config_store: Some(config_store), watcher_interval, ..Self::default() }
     }
+
+    async fn before_tool_call(
+        &self,
+        request: &CallToolRequestParams,
+        tool_name: &str,
+        backend_name: &str,
+    ) -> Result<ToolPreCallResult, ErrorData> {
+        self.handle().before_tool_call(request, tool_name, backend_name).await
+    }
+
+    async fn after_tool_call(
+        &self,
+        tool_name: &str,
+        response: CallToolResult,
+        state: Option<RuntimeHookState>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.handle().after_tool_call(tool_name, response, state).await
+    }
 }
 
 async fn apply_runtime_config(
@@ -675,6 +698,12 @@ impl CpexRuntimeRegistry {
     pub async fn initialize(&self) -> Result<Option<JoinHandle<()>>, RuntimeHookError> {
         let initial_config = reload_runtime(&self.runtime, self.config_store.as_ref(), &self.factories).await?;
         Ok(self.start_config_watcher(initial_config))
+    }
+}
+
+impl GatewayPluginRuntimeHandle {
+    fn current(&self) -> Arc<GatewayPluginRuntime> {
+        self.runtime.load_full()
     }
 
     pub async fn before_tool_call(

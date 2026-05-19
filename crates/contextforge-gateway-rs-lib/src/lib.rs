@@ -74,7 +74,7 @@ impl Gateway {
         let user_config_store = user_config_store as Arc<dyn UserConfigStore + Send + Sync>;
 
         let user_session_store = LocalUserSessionStore::new();
-        let mcp_plugin_runtime = self.plugin_runtime;
+        let mcp_plugin_runtime = self.plugin_runtime.as_ref().map(|runtime| runtime.handle());
 
         let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
 

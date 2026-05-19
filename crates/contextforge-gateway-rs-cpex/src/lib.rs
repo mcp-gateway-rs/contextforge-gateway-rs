@@ -9,5 +9,5 @@ mod runtime;
 
 pub use error::GatewayPluginRuntimeError;
 pub use factory::CmfPluginFactory;
-pub use handle::CpexRuntimeRegistry;
+pub use handle::{CpexRuntimeRegistry, GatewayPluginRuntimeHandle};
 pub use hooks::{RuntimeHookError, RuntimeHookState, ToolArgumentsUpdate, ToolPreCallResult};
