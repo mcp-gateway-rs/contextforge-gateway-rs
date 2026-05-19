@@ -53,13 +53,19 @@ pub(crate) fn tool_call_arguments(payload: &MessagePayload) -> Option<Map<String
 
 pub(crate) fn tool_result_response(original: CallToolResult, payload: &MessagePayload) -> CallToolResult {
     let mut result = payload.message.get_tool_results().first().map_or(original, |tool_result| {
-        serde_json::from_value::<CallToolResult>(tool_result.content.clone()).unwrap_or_else(|_| {
-            if tool_result.is_error {
-                raw_error_tool_result(tool_result.content.clone())
-            } else {
-                raw_success_tool_result(tool_result.content.clone())
-            }
-        })
+        serde_json::from_value::<CallToolResult>(tool_result.content.clone()).map_or_else(
+            |_| {
+                if tool_result.is_error {
+                    raw_error_tool_result(tool_result.content.clone())
+                } else {
+                    raw_success_tool_result(tool_result.content.clone())
+                }
+            },
+            |mut result| {
+                result.is_error = Some(tool_result.is_error);
+                result
+            },
+        )
     });
 
     let text = payload.message.get_text_content();
@@ -83,5 +89,25 @@ fn raw_error_tool_result(value: Value) -> CallToolResult {
         CallToolResult::error(vec![Content::text(text)])
     } else {
         CallToolResult::structured_error(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_result_response_uses_cmf_error_flag_for_nested_mcp_result() {
+        let original = CallToolResult::success(vec![Content::text("original")]);
+        let nested = CallToolResult::success(vec![Content::text("changed")]);
+        let mut payload = tool_result_payload("sum", &nested, "call-1");
+        let ContentPart::ToolResult { content } = &mut payload.message.content[0] else {
+            panic!("expected tool result");
+        };
+        content.is_error = true;
+
+        let result = tool_result_response(original, &payload);
+
+        assert_eq!(Some(true), result.is_error);
     }
 }

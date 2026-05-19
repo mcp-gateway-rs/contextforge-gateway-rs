@@ -280,6 +280,15 @@ where
         let tool_name = tool_name.to_owned();
         let request_name = request.name.clone();
 
+        let pre_result = if let Some(plugin_runtime) = &self.plugin_runtime {
+            plugin_runtime.before_tool_call(&request, &tool_name, &backend_name).await?
+        } else {
+            ToolPreCallResult::unchanged()
+        };
+        let post_state = pre_result.state;
+        let mut routed_request = request;
+        pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
+
         let backend_transports = session_manager.borrow_transports().await;
         info!("Borrowed transports {session_id:?} {backend_transports:?}");
         let mut services = Vec::new();
@@ -325,26 +334,6 @@ where
             });
         };
 
-        let pre_result = if let Some(plugin_runtime) = &self.plugin_runtime {
-            match plugin_runtime.before_tool_call(&request, &tool_name, &backend_name).await {
-                Ok(pre_result) => pre_result,
-                Err(error) => {
-                    session_manager
-                        .return_transports(
-                            services
-                                .into_iter()
-                                .chain(std::iter::once(ServiceHolder::new(target_service.name, Some(service)))),
-                        )
-                        .await;
-                    return Err(error);
-                },
-            }
-        } else {
-            ToolPreCallResult::unchanged()
-        };
-        let post_state = pre_result.state;
-        let mut routed_request = request;
-        pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
         let service_name = target_service.name.clone();
         let response = service.call_tool(routed_request).await;
         session_manager
@@ -360,12 +349,14 @@ where
                 data: None,
             }
         })?;
-        info!("call_tool: backend {service_name} {response:?}");
-        if let Some(plugin_runtime) = &self.plugin_runtime {
-            plugin_runtime.after_tool_call(&tool_name, response, post_state).await
-        } else {
-            Ok(response)
-        }
+        let response = match (&self.plugin_runtime, post_state) {
+            (Some(plugin_runtime), Some(post_state)) => {
+                plugin_runtime.after_tool_call(&tool_name, response, Some(post_state)).await?
+            },
+            _ => response,
+        };
+        info!("call_tool: backend {service_name} completed");
+        Ok(response)
     }
 
     async fn list_resources(

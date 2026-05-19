@@ -69,10 +69,15 @@ impl Gateway {
 
         let user_session_store = LocalUserSessionStore::new();
         let plugin_runtime = self.plugin_runtime;
-        if runtime_plugins_enabled && let Some(plugin_runtime) = &plugin_runtime {
+        let mcp_plugin_runtime = if runtime_plugins_enabled {
+            let Some(plugin_runtime) = plugin_runtime else {
+                return Err("runtime plugins enabled without plugin runtime".into());
+            };
             plugin_runtime.initialize().await?;
-        }
-        let mcp_plugin_runtime = if runtime_plugins_enabled { plugin_runtime } else { None };
+            Some(plugin_runtime)
+        } else {
+            None
+        };
 
         let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
 

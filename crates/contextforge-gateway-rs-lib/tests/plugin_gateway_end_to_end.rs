@@ -156,7 +156,10 @@ async fn enabled_runtime_applies_config_change_after_gateway_start() {
         "version": 1,
         "cpex": { "plugins": [] }
     }));
-    let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store.clone()));
+    let mut runtime = CpexRuntimeRegistry::with_config_store_interval(
+        Arc::new(config_store.clone()),
+        tokio::time::Duration::from_millis(10),
+    );
     runtime
         .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
         .expect("test factory registers");
@@ -179,9 +182,14 @@ async fn enabled_runtime_applies_config_change_after_gateway_start() {
             }
         }))
         .await;
-    runtime.reload().await.expect("runtime reloads");
-
-    let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
-    assert_eq!("30", text(&result));
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(1);
+    loop {
+        let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
+        if text(&result) == "30" {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "runtime config watcher did not apply plugin config");
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
     assert_eq!(1, observations.lock().expect("observations lock poisoned").pre_calls);
 }

@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex as StdMutex},
+    sync::{Arc, Mutex as StdMutex, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -26,8 +26,11 @@ use rmcp::{
     },
 };
 use serde_json::{Map, Value};
+use tokio::sync::Mutex as TokioMutex;
 
 use super::{MemoryUserConfigStore, token};
+
+static GATEWAY_PORT_LOCK: OnceLock<Arc<TokioMutex<()>>> = OnceLock::new();
 
 #[derive(Clone)]
 pub(crate) struct BackendObservation {
@@ -148,6 +151,8 @@ async fn start_gateway_with_runtime(
     runtime_plugins_enabled: bool,
     plugin_runtime: Arc<CpexRuntimeRegistry>,
 ) -> RunningGateway {
+    let port_lock = Arc::clone(GATEWAY_PORT_LOCK.get_or_init(|| Arc::new(TokioMutex::new(()))));
+    let port_guard = port_lock.lock().await;
     let gateway_port = openport::pick_random_unused_port().expect("gateway port");
     let backend_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("backend binds");
     let backend_port = backend_listener.local_addr().expect("backend address").port();
@@ -206,10 +211,28 @@ async fn start_gateway_with_runtime(
     }
     .boxed();
 
+    let handle = tokio::spawn(futures::future::join_all(vec![gateway, backend]));
+    wait_for_gateway_port(gateway_port).await;
+    drop(port_guard);
+
     RunningGateway {
         backend_state,
         backend_name,
         gateway_url: format!("http://127.0.0.1:{gateway_port}/contextforge-rs/servers/{virtual_host_id}/mcp"),
-        handle: Some(tokio::spawn(futures::future::join_all(vec![gateway, backend]))),
+        handle: Some(handle),
+    }
+}
+
+async fn wait_for_gateway_port(port: u16) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
+            Ok(_) => return,
+            Err(error) if Instant::now() < deadline => {
+                let _ = error;
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            },
+            Err(error) => panic!("gateway TCP listener starts: {error:?}"),
+        }
     }
 }
