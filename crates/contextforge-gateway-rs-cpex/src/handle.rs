@@ -24,6 +24,8 @@ use crate::{
     runtime::GatewayPluginRuntime,
 };
 
+const DEFAULT_CONFIG_WATCHER_INTERVAL: Duration = Duration::from_secs(600);
+
 pub struct CpexRuntimeRegistry {
     runtime: Arc<ArcSwap<GatewayPluginRuntime>>,
     config_store: Option<Arc<dyn RuntimePluginConfigStore>>,
@@ -49,7 +51,7 @@ impl Default for CpexRuntimeRegistry {
             config_store: None,
             factories: Arc::new(PluginFactoryRegistry::new()),
             watcher_started: AtomicBool::new(false),
-            watcher_interval: Duration::from_secs(600),
+            watcher_interval: DEFAULT_CONFIG_WATCHER_INTERVAL,
         }
     }
 }
