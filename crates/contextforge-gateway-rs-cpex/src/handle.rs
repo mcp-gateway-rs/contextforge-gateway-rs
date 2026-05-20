@@ -49,7 +49,7 @@ impl Default for CpexRuntimeRegistry {
             config_store: None,
             factories: Arc::new(PluginFactoryRegistry::new()),
             watcher_started: AtomicBool::new(false),
-            watcher_interval: Duration::from_secs(2),
+            watcher_interval: Duration::from_secs(600),
         }
     }
 }
