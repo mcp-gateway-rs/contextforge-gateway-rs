@@ -531,6 +531,7 @@ dependencies = [
 name = "contextforge-gateway-rs-apis"
 version = "0.1.0"
 dependencies = [
+ "cpex-core",
  "schemars",
  "serde",
  "serde_json",
@@ -543,6 +544,7 @@ version = "0.1.0"
 dependencies = [
  "arc-swap",
  "async-trait",
+ "contextforge-gateway-rs-apis",
  "cpex-core",
  "redis",
  "rmcp",

@@ -18,7 +18,7 @@ use rmcp::{
 use tokio::task::JoinHandle;
 
 use crate::{
-    config::{LoadedRuntimePluginConfig, RedisRuntimePluginConfigStore, RuntimePluginConfigStore},
+    config::{LoadedRuntimePluginConfig, RedisRuntimePluginConfigStore, RuntimePluginConfigStore, cpex_config},
     error::GatewayPluginRuntimeError,
     hooks::{RuntimeHookError, RuntimeHookState, ToolPreCallResult},
     runtime::GatewayPluginRuntime,
@@ -161,7 +161,7 @@ async fn reload_runtime(
 }
 
 fn config_to_cpex(config: &LoadedRuntimePluginConfig) -> Result<Option<CpexConfig>, GatewayPluginRuntimeError> {
-    config.document.cpex_config().map(Some)
+    cpex_config(&config.document).map(Some)
 }
 
 #[cfg(test)]
@@ -304,7 +304,11 @@ mod tests {
     use serde_json::{Value, json};
     use tokio::sync::Mutex as TokioMutex;
 
-    use crate::config::{LoadedRuntimePluginConfig, RuntimePluginConfigDocument};
+    use contextforge_gateway_rs_apis::runtime_plugin_config::{
+        RUNTIME_PLUGIN_CONFIG_VERSION, RuntimePluginConfigDocument,
+    };
+
+    use crate::config::LoadedRuntimePluginConfig;
     use crate::{CmfPluginFactory, ToolArgumentsUpdate};
 
     use super::*;
@@ -346,7 +350,7 @@ mod tests {
     impl RuntimePluginConfigStore for MemoryConfigStore {
         async fn get_config(&self) -> Result<Option<LoadedRuntimePluginConfig>, GatewayPluginRuntimeError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(self.config.lock().await.clone().map(loaded_config))
+            Ok(self.config.lock().await.as_ref().map(loaded_config))
         }
     }
 
@@ -547,12 +551,15 @@ mod tests {
     }
 
     fn config_document(cpex: Value) -> RuntimePluginConfigDocument {
-        RuntimePluginConfigDocument { version: 1, cpex: serde_json::from_value(cpex).expect("test CPEX config parses") }
+        RuntimePluginConfigDocument {
+            version: RUNTIME_PLUGIN_CONFIG_VERSION,
+            cpex: serde_json::from_value(cpex).expect("test CPEX config parses"),
+        }
     }
 
-    fn loaded_config(document: RuntimePluginConfigDocument) -> LoadedRuntimePluginConfig {
-        let fingerprint = serde_json::to_vec(&document).expect("test CPEX config serializes");
-        LoadedRuntimePluginConfig { document, fingerprint }
+    fn loaded_config(document: &RuntimePluginConfigDocument) -> LoadedRuntimePluginConfig {
+        LoadedRuntimePluginConfig::decode(serde_json::to_vec(document).expect("test CPEX config serializes"))
+            .expect("test CPEX config decodes")
     }
 
     fn plugin_config(plugins: &[Arc<TestPlugin>]) -> RuntimePluginConfigDocument {

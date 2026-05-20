@@ -9,6 +9,7 @@ keywords.workspace = true
 [dependencies]
 arc-swap.workspace = true
 async-trait.workspace = true
+contextforge-gateway-rs-apis.workspace = true
 cpex-core.workspace = true
 redis.workspace = true
 rmcp.workspace = true
