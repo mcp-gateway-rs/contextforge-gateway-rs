@@ -116,11 +116,113 @@ impl CpexRuntimeRegistry {
     }
 }
 
+async fn reload_runtime(
+    runtime: &ArcSwap<GatewayPluginRuntime>,
+    config_store: Option<&Arc<dyn RuntimePluginConfigStore>>,
+    factories: &PluginFactoryRegistry,
+) -> Result<Option<serde_json::Value>, GatewayPluginRuntimeError> {
+    let Some(config_store) = config_store else {
+        return Ok(None);
+    };
+    let config = config_store.get_config().await?;
+    apply_runtime_config(runtime, factories, config_from_document(config.as_ref())?).await?;
+    Ok(config)
+}
+
+fn config_from_document(config: Option<&serde_json::Value>) -> Result<Option<CpexConfig>, GatewayPluginRuntimeError> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+    serde_json::from_value(cpex_config_from_document(config)?)
+        .map(Some)
+        .map_err(|_| GatewayPluginRuntimeError::ConfigWrongFormat)
+}
+
 #[cfg(test)]
-#[allow(
-    clippy::items_after_test_module,
-    reason = "large inline test module keeps CPEX unit-only helpers out of public API"
-)]
+impl CpexRuntimeRegistry {
+    fn with_config_store(config_store: Arc<dyn RuntimePluginConfigStore>) -> Self {
+        Self { config_store: Some(config_store), ..Self::default() }
+    }
+
+    fn with_config_store_interval(config_store: Arc<dyn RuntimePluginConfigStore>, watcher_interval: Duration) -> Self {
+        Self { config_store: Some(config_store), watcher_interval, ..Self::default() }
+    }
+
+    async fn before_tool_call(
+        &self,
+        request: &CallToolRequestParams,
+        tool_name: &str,
+        backend_name: &str,
+    ) -> Result<ToolPreCallResult, ErrorData> {
+        self.handle().before_tool_call(request, tool_name, backend_name).await
+    }
+
+    async fn after_tool_call(
+        &self,
+        tool_name: &str,
+        response: CallToolResult,
+        state: Option<RuntimeHookState>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.handle().after_tool_call(tool_name, response, state).await
+    }
+}
+
+async fn apply_runtime_config(
+    runtime: &ArcSwap<GatewayPluginRuntime>,
+    factories: &PluginFactoryRegistry,
+    config: Option<CpexConfig>,
+) -> Result<(), GatewayPluginRuntimeError> {
+    let Some(config) = config else {
+        drop(runtime.swap(Arc::new(GatewayPluginRuntime::default())));
+        return Ok(());
+    };
+    drop(runtime.swap(Arc::new(GatewayPluginRuntime::from_config(config, factories).await?)));
+    Ok(())
+}
+
+impl CpexRuntimeRegistry {
+    pub async fn initialize(&self) -> Result<Option<JoinHandle<()>>, RuntimeHookError> {
+        let initial_config = reload_runtime(&self.runtime, self.config_store.as_ref(), &self.factories).await?;
+        Ok(self.start_config_watcher(initial_config))
+    }
+}
+
+impl GatewayPluginRuntimeHandle {
+    fn current(&self) -> Arc<GatewayPluginRuntime> {
+        self.runtime.load_full()
+    }
+
+    pub async fn before_tool_call(
+        &self,
+        request: &CallToolRequestParams,
+        tool_name: &str,
+        backend_name: &str,
+    ) -> Result<ToolPreCallResult, ErrorData> {
+        let runtime = self.current();
+        let mut result = runtime.before_tool_call(request, tool_name, backend_name).await?;
+        if runtime.has_post_hook() {
+            let state = result.state.take();
+            result.state = Some(Box::new(RegistryToolCallState { runtime, state }));
+        } else {
+            result.state = None;
+        }
+        Ok(result)
+    }
+
+    pub async fn after_tool_call(
+        &self,
+        tool_name: &str,
+        response: CallToolResult,
+        state: Option<RuntimeHookState>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match state.and_then(|state| state.downcast::<RegistryToolCallState>().ok()) {
+            Some(state) => state.runtime.after_tool_call(tool_name, response, state.state).await,
+            None => Ok(response),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::{
         collections::HashMap,
@@ -627,111 +729,5 @@ mod tests {
         let handle = runtime.initialize().await.expect("runtime initializes");
 
         assert!(handle.is_none());
-    }
-}
-
-async fn reload_runtime(
-    runtime: &ArcSwap<GatewayPluginRuntime>,
-    config_store: Option<&Arc<dyn RuntimePluginConfigStore>>,
-    factories: &PluginFactoryRegistry,
-) -> Result<Option<serde_json::Value>, GatewayPluginRuntimeError> {
-    let Some(config_store) = config_store else {
-        return Ok(None);
-    };
-    let config = config_store.get_config().await?;
-    apply_runtime_config(runtime, factories, config_from_document(config.as_ref())?).await?;
-    Ok(config)
-}
-
-fn config_from_document(config: Option<&serde_json::Value>) -> Result<Option<CpexConfig>, GatewayPluginRuntimeError> {
-    let Some(config) = config else {
-        return Ok(None);
-    };
-    serde_json::from_value(cpex_config_from_document(config)?)
-        .map(Some)
-        .map_err(|_| GatewayPluginRuntimeError::ConfigWrongFormat)
-}
-
-#[cfg(test)]
-impl CpexRuntimeRegistry {
-    fn with_config_store(config_store: Arc<dyn RuntimePluginConfigStore>) -> Self {
-        Self { config_store: Some(config_store), ..Self::default() }
-    }
-
-    fn with_config_store_interval(config_store: Arc<dyn RuntimePluginConfigStore>, watcher_interval: Duration) -> Self {
-        Self { config_store: Some(config_store), watcher_interval, ..Self::default() }
-    }
-
-    async fn before_tool_call(
-        &self,
-        request: &CallToolRequestParams,
-        tool_name: &str,
-        backend_name: &str,
-    ) -> Result<ToolPreCallResult, ErrorData> {
-        self.handle().before_tool_call(request, tool_name, backend_name).await
-    }
-
-    async fn after_tool_call(
-        &self,
-        tool_name: &str,
-        response: CallToolResult,
-        state: Option<RuntimeHookState>,
-    ) -> Result<CallToolResult, ErrorData> {
-        self.handle().after_tool_call(tool_name, response, state).await
-    }
-}
-
-async fn apply_runtime_config(
-    runtime: &ArcSwap<GatewayPluginRuntime>,
-    factories: &PluginFactoryRegistry,
-    config: Option<CpexConfig>,
-) -> Result<(), GatewayPluginRuntimeError> {
-    let Some(config) = config else {
-        drop(runtime.swap(Arc::new(GatewayPluginRuntime::default())));
-        return Ok(());
-    };
-    drop(runtime.swap(Arc::new(GatewayPluginRuntime::from_config(config, factories).await?)));
-    Ok(())
-}
-
-impl CpexRuntimeRegistry {
-    pub async fn initialize(&self) -> Result<Option<JoinHandle<()>>, RuntimeHookError> {
-        let initial_config = reload_runtime(&self.runtime, self.config_store.as_ref(), &self.factories).await?;
-        Ok(self.start_config_watcher(initial_config))
-    }
-}
-
-impl GatewayPluginRuntimeHandle {
-    fn current(&self) -> Arc<GatewayPluginRuntime> {
-        self.runtime.load_full()
-    }
-
-    pub async fn before_tool_call(
-        &self,
-        request: &CallToolRequestParams,
-        tool_name: &str,
-        backend_name: &str,
-    ) -> Result<ToolPreCallResult, ErrorData> {
-        let runtime = self.current();
-        let mut result = runtime.before_tool_call(request, tool_name, backend_name).await?;
-        if runtime.has_post_hook() {
-            let state = result.state.take();
-            result.state = Some(Box::new(RegistryToolCallState { runtime, state }));
-        } else {
-            result.state = None;
-        }
-        Ok(result)
-    }
-
-    pub async fn after_tool_call(
-        &self,
-        tool_name: &str,
-        response: CallToolResult,
-        state: Option<RuntimeHookState>,
-    ) -> Result<CallToolResult, ErrorData> {
-        match state.and_then(|state| state.downcast::<RegistryToolCallState>().ok()) {
-            Some(state) => state.runtime.after_tool_call(tool_name, response, state.state).await,
-            None => Ok(response),
-        }
     }
 }

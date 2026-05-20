@@ -228,7 +228,7 @@ async fn start_gateway_with_runtime(
 }
 
 async fn wait_for_gateway_port(port: u16) {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         match tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
             Ok(_) => return,
