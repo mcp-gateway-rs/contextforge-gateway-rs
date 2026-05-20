@@ -75,7 +75,7 @@ This integration currently passes only tool payloads. CPEX configs that enable r
 
 ### Payload Marker Demo
 
-This demo uses [`cpex-payload-marker`](https://github.com/contextforge-gateway-rs/cpex-plugins-rs/tree/main/crates/cpex-payload-marker). The plugin must be included in the gateway build before the gateway starts. Redis runtime registration activates already-registered factories; it does not load new Rust code into a running process.
+This demo uses [`cpex-payload-marker`](https://github.com/contextforge-gateway-rs/cpex-plugins-rs/tree/07af215bc9f00a6c3cd6d4838479518569607581/crates/cpex-payload-marker). The plugin must be included in the gateway build before the gateway starts. Redis runtime registration activates already-registered factories; it does not load new Rust code into a running process.
 
 Build the gateway with the demo plugin factories:
 
@@ -209,6 +209,17 @@ curl --silent --show-error \
 SESSION_ID=$(awk 'tolower($1) == "mcp-session-id:" { gsub("\r", "", $2); print $2 }' "${INIT_HEADERS}")
 ```
 
+```bash
+curl --silent --show-error \
+  --url http://127.0.0.1:8001/contextforge-rs/servers/c0ffee00f001f00lf00ldeadbeefdead/mcp \
+  --header "authorization: Bearer ${TOKEN}" \
+  --header "mcp-session-id: ${SESSION_ID}" \
+  --header 'mcp-protocol-version: 2025-11-25' \
+  --header 'content-type: application/json' \
+  --header 'accept: application/json, text/event-stream' \
+  --data '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+```
+
 Send a tool request:
 
 ```bash
@@ -216,6 +227,7 @@ curl --silent --show-error \
   --url http://127.0.0.1:8001/contextforge-rs/servers/c0ffee00f001f00lf00ldeadbeefdead/mcp \
   --header "authorization: Bearer ${TOKEN}" \
   --header "mcp-session-id: ${SESSION_ID}" \
+  --header 'mcp-protocol-version: 2025-11-25' \
   --header 'content-type: application/json' \
   --header 'accept: application/json, text/event-stream' \
   --data '{
