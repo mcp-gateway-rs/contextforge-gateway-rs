@@ -1,6 +1,7 @@
 use std::{fs, sync::Arc};
 
 use axum::middleware;
+use contextforge_gateway_rs_cpex::GatewayPluginRuntimeHandle;
 use futures::FutureExt;
 use jsonwebtoken::DecodingKey;
 use rmcp::transport::{
@@ -53,7 +54,7 @@ pub struct Gateway {
     session_manager: Arc<LocalSessionManager>,
     user_config_store_type: UserConfigStoreType,
     #[builder(default)]
-    plugin_runtime: Option<Arc<contextforge_gateway_rs_cpex::CpexRuntimeRegistry>>,
+    plugin_runtime: Option<GatewayPluginRuntimeHandle>,
 }
 
 impl Gateway {
@@ -67,7 +68,7 @@ impl Gateway {
         let user_config_store = user_config_store as Arc<dyn UserConfigStore + Send + Sync>;
 
         let user_session_store = LocalUserSessionStore::new();
-        let mcp_plugin_runtime = self.plugin_runtime.as_ref().map(|runtime| runtime.handle());
+        let mcp_plugin_runtime = self.plugin_runtime;
 
         let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
 

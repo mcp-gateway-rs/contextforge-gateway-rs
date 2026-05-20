@@ -1,4 +1,7 @@
-use std::{sync::Arc, thread};
+use std::{
+    sync::{Arc, mpsc},
+    thread,
+};
 
 use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use contextforge_gateway_rs_lib::{Config, Gateway};
@@ -7,6 +10,7 @@ use futures::{
     future::{BoxFuture, join_all},
 };
 use tokio::runtime::{Builder, LocalOptions};
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone)]
@@ -75,63 +79,101 @@ impl Runtime {
             self.configure_builder(&mut builder, self.thread_name.clone());
             let runtime = builder.build()?;
 
-            runtime.block_on(async { Self::initialize(gateway, cpex_runtime).await })
+            runtime.block_on(async {
+                let _cpex_watcher = Self::initialize_cpex_runtime(cpex_runtime).await?;
+                Self::run_gateway(gateway).await
+            })
         } else {
-            let handles = (0..self.number_of_threads)
-                .map(|i| {
-                    let thread_name = self.thread_name.clone();
-                    let gateway = gateway.clone();
-                    let cpex_runtime = cpex_runtime.clone();
-                    thread::Builder::new().name("contextforge-gateway-rs-{i}".to_owned()).spawn(move || {
-                        let mut builder = Builder::new_current_thread();
+            let (init_sender, init_receiver) = mpsc::channel();
+            let mut handles = vec![Self::spawn_gateway_thread(
+                format!("{}0", self.thread_name),
+                gateway.clone(),
+                cpex_runtime,
+                Some(init_sender),
+            )?];
+            match init_receiver
+                .recv()
+                .map_err(|error| format!("CPEX plugin initialization result unavailable: {error}"))?
+            {
+                Ok(()) => {},
+                Err(error) => return Err(error.into()),
+            }
 
-                        Self::configure_single_thread_builder(&mut builder, format!("{thread_name}{i}"));
-                        let runtime = match builder.build_local(LocalOptions::default()) {
-                            Ok(runtime) => runtime,
-                            Err(error) => {
-                                warn!("Can't build thread {error:?}");
-                                return Err::<(), contextforge_gateway_rs_lib::Error>(error.into());
-                            },
-                        };
-
-                        runtime.block_on(async { Self::initialize(gateway, cpex_runtime).await })
-                    })
-                })
-                .collect::<Vec<_>>();
-
-            for maybe_handle in handles {
-                if let Ok(handle) = maybe_handle {
-                    let res = handle.join();
-                    info!("Thread terminated with {res:?}");
-                } else {
-                    warn!("Thread terminated at start with {maybe_handle:?}");
+            for i in 1..self.number_of_threads {
+                match Self::spawn_gateway_thread(format!("{}{i}", self.thread_name), gateway.clone(), None, None) {
+                    Ok(handle) => handles.push(handle),
+                    Err(error) => warn!("Thread terminated at start with {error:?}"),
                 }
+            }
+
+            for handle in handles {
+                let res = handle.join();
+                info!("Thread terminated with {res:?}");
             }
             Ok(())
         }
     }
 
-    fn initialize(
+    fn spawn_gateway_thread(
+        thread_name: String,
         gateway: Gateway,
         cpex_runtime: Option<Arc<CpexRuntimeRegistry>>,
-    ) -> BoxFuture<'static, contextforge_gateway_rs_lib::Result<()>> {
-        async {
-            if let Some(cpex_runtime) = cpex_runtime {
-                let handle = cpex_runtime.initialize().await;
-                match handle {
-                    Ok(Some(_runtime_handle)) => {
-                        debug!("CPEX Plugins initialization successful");
+        init_sender: Option<mpsc::Sender<std::result::Result<(), String>>>,
+    ) -> std::io::Result<thread::JoinHandle<contextforge_gateway_rs_lib::Result<()>>> {
+        thread::Builder::new().name(thread_name.clone()).spawn(move || {
+            let mut builder = Builder::new_current_thread();
+            Self::configure_single_thread_builder(&mut builder, thread_name);
+            let runtime = match builder.build_local(LocalOptions::default()) {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    warn!("Can't build thread {error:?}");
+                    return Err::<(), contextforge_gateway_rs_lib::Error>(error.into());
+                },
+            };
+
+            runtime.block_on(async {
+                let Some(init_sender) = init_sender else {
+                    return Self::run_gateway(gateway).await;
+                };
+                match Self::initialize_cpex_runtime(cpex_runtime).await {
+                    Ok(cpex_watcher) => {
+                        let _ = init_sender.send(Ok(()));
+                        let _cpex_watcher = cpex_watcher;
+                        Self::run_gateway(gateway).await
                     },
-                    Ok(None) => {
-                        debug!("CPEX Plugins initialization skipped??");
-                    },
-                    Err(e) => {
-                        error!("CPEX Plugins initialization failed {e:?}");
-                        return Err(e);
+                    Err(error) => {
+                        let _ = init_sender.send(Err(error.to_string()));
+                        Err(error)
                     },
                 }
-            }
+            })
+        })
+    }
 
+    async fn initialize_cpex_runtime(
+        cpex_runtime: Option<Arc<CpexRuntimeRegistry>>,
+    ) -> contextforge_gateway_rs_lib::Result<Option<JoinHandle<()>>> {
+        let Some(cpex_runtime) = cpex_runtime else {
+            return Ok(None);
+        };
+        match cpex_runtime.initialize().await {
+            Ok(Some(handle)) => {
+                debug!("CPEX Plugins initialization successful");
+                Ok(Some(handle))
+            },
+            Ok(None) => {
+                debug!("CPEX Plugins initialization skipped");
+                Ok(None)
+            },
+            Err(e) => {
+                error!("CPEX Plugins initialization failed {e:?}");
+                Err(e)
+            },
+        }
+    }
+
+    fn run_gateway(gateway: Gateway) -> BoxFuture<'static, contextforge_gateway_rs_lib::Result<()>> {
+        async {
             let _ = join_all(vec![
                 async {
                     let res = gateway.run_gateway().await;

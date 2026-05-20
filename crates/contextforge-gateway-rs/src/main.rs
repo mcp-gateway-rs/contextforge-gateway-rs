@@ -25,11 +25,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let runtime = runtime::Runtime::from(&config);
 
-    let plugin_runtime = if config.runtime_plugins_enabled.unwrap_or(false) {
+    let plugin_registry = if config.runtime_plugins_enabled.unwrap_or(false) {
         Some(Arc::new(plugin_runtime_from_config(&config)?))
     } else {
         None
     };
+    let plugin_runtime = plugin_registry.as_ref().map(|runtime| runtime.handle());
 
     let gateway = Gateway::builder()
         .with_config(config)
@@ -38,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .with_plugin_runtime(plugin_runtime.clone())
         .build();
 
-    runtime.execute(gateway, plugin_runtime)
+    runtime.execute(gateway, plugin_registry)
 }
 
 fn plugin_runtime_from_config(
