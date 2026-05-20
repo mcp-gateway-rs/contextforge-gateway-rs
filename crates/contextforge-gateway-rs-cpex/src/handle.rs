@@ -18,7 +18,7 @@ use rmcp::{
 use tokio::task::JoinHandle;
 
 use crate::{
-    config::{RedisRuntimePluginConfigStore, RuntimePluginConfigStore, cpex_config_from_document},
+    config::{RedisRuntimePluginConfigStore, RuntimePluginConfigDocument, RuntimePluginConfigStore},
     error::GatewayPluginRuntimeError,
     hooks::{RuntimeHookError, RuntimeHookState, ToolPreCallResult},
     runtime::GatewayPluginRuntime,
@@ -81,7 +81,7 @@ impl CpexRuntimeRegistry {
         GatewayPluginRuntimeHandle { runtime: Arc::clone(&self.runtime) }
     }
 
-    fn start_config_watcher(&self, initial_config: Option<serde_json::Value>) -> Option<JoinHandle<()>> {
+    fn start_config_watcher(&self, initial_config: Option<Vec<u8>>) -> Option<JoinHandle<()>> {
         let config_store = self.config_store.clone()?;
         if self.watcher_started.swap(true, Ordering::AcqRel) {
             return None;
@@ -98,14 +98,21 @@ impl CpexRuntimeRegistry {
                     break;
                 };
                 match config_store.get_config().await {
-                    Ok(config) if config == last_applied_config => {},
                     Ok(config) => {
-                        let result = match config_from_document(config.as_ref()) {
+                        let fingerprint = match config_fingerprint(config.as_ref()) {
+                            Ok(fingerprint) if fingerprint == last_applied_config => continue,
+                            Ok(fingerprint) => fingerprint,
+                            Err(error) => {
+                                tracing::warn!(%error, "failed to reload CPEX runtime plugin config");
+                                continue;
+                            },
+                        };
+                        let result = match config_to_cpex(config.as_ref()) {
                             Ok(config) => apply_runtime_config(&runtime, &factories, config).await,
                             Err(error) => Err(error),
                         };
                         match result {
-                            Ok(()) => last_applied_config = config,
+                            Ok(()) => last_applied_config = fingerprint,
                             Err(error) => tracing::warn!(%error, "failed to reload CPEX runtime plugin config"),
                         }
                     },
@@ -120,22 +127,28 @@ async fn reload_runtime(
     runtime: &ArcSwap<GatewayPluginRuntime>,
     config_store: Option<&Arc<dyn RuntimePluginConfigStore>>,
     factories: &PluginFactoryRegistry,
-) -> Result<Option<serde_json::Value>, GatewayPluginRuntimeError> {
+) -> Result<Option<Vec<u8>>, GatewayPluginRuntimeError> {
     let Some(config_store) = config_store else {
         return Ok(None);
     };
     let config = config_store.get_config().await?;
-    apply_runtime_config(runtime, factories, config_from_document(config.as_ref())?).await?;
-    Ok(config)
+    apply_runtime_config(runtime, factories, config_to_cpex(config.as_ref())?).await?;
+    config_fingerprint(config.as_ref())
 }
 
-fn config_from_document(config: Option<&serde_json::Value>) -> Result<Option<CpexConfig>, GatewayPluginRuntimeError> {
+fn config_to_cpex(
+    config: Option<&RuntimePluginConfigDocument>,
+) -> Result<Option<CpexConfig>, GatewayPluginRuntimeError> {
     let Some(config) = config else {
         return Ok(None);
     };
-    serde_json::from_value(cpex_config_from_document(config)?)
-        .map(Some)
-        .map_err(|_| GatewayPluginRuntimeError::ConfigWrongFormat)
+    config.cpex_config().map(Some)
+}
+
+fn config_fingerprint(
+    config: Option<&RuntimePluginConfigDocument>,
+) -> Result<Option<Vec<u8>>, GatewayPluginRuntimeError> {
+    config.map(serde_json::to_vec).transpose().map_err(|_| GatewayPluginRuntimeError::ConfigWrongFormat)
 }
 
 #[cfg(test)]
@@ -253,16 +266,16 @@ mod tests {
 
     #[derive(Clone, Default)]
     struct MemoryConfigStore {
-        config: Arc<TokioMutex<Option<Value>>>,
+        config: Arc<TokioMutex<Option<RuntimePluginConfigDocument>>>,
         calls: Arc<AtomicUsize>,
     }
 
     impl MemoryConfigStore {
-        fn with_config(config: Value) -> Self {
+        fn with_config(config: RuntimePluginConfigDocument) -> Self {
             Self { config: Arc::new(TokioMutex::new(Some(config))), calls: Arc::new(AtomicUsize::new(0)) }
         }
 
-        async fn set_config(&self, config: Value) {
+        async fn set_config(&self, config: RuntimePluginConfigDocument) {
             *self.config.lock().await = Some(config);
         }
 
@@ -277,7 +290,7 @@ mod tests {
 
     #[async_trait]
     impl RuntimePluginConfigStore for MemoryConfigStore {
-        async fn get_config(&self) -> Result<Option<Value>, GatewayPluginRuntimeError> {
+        async fn get_config(&self) -> Result<Option<RuntimePluginConfigDocument>, GatewayPluginRuntimeError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(self.config.lock().await.clone())
         }
@@ -477,22 +490,23 @@ mod tests {
             .with_arguments(serde_json::Map::from_iter([("a".to_owned(), json!(a)), ("b".to_owned(), json!(b))]))
     }
 
-    fn plugin_config(plugins: &[Arc<TestPlugin>]) -> Value {
-        json!({
-            "version": 1,
-            "cpex": {
-                "plugins": plugins.iter().map(|plugin| {
-                    json!({
-                        "name": plugin.config.name.clone(),
-                        "kind": plugin.config.kind.clone(),
-                        "hooks": plugin.config.hooks.clone(),
-                    })
-                }).collect::<Vec<_>>()
-            }
-        })
+    fn config_document(cpex: Value) -> RuntimePluginConfigDocument {
+        RuntimePluginConfigDocument { version: 1, cpex: serde_json::from_value(cpex).expect("test CPEX config parses") }
     }
 
-    async fn runtime_with_plugin(plugin: &Arc<TestPlugin>, config: Value) -> CpexRuntimeRegistry {
+    fn plugin_config(plugins: &[Arc<TestPlugin>]) -> RuntimePluginConfigDocument {
+        config_document(json!({
+            "plugins": plugins.iter().map(|plugin| {
+                json!({
+                    "name": plugin.config.name.clone(),
+                    "kind": plugin.config.kind.clone(),
+                    "hooks": plugin.config.hooks.clone(),
+                })
+            }).collect::<Vec<_>>()
+        }))
+    }
+
+    async fn runtime_with_plugin(plugin: &Arc<TestPlugin>, config: RuntimePluginConfigDocument) -> CpexRuntimeRegistry {
         let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(config)));
         runtime
             .register_factory("test", Box::new(TestPluginFactory::from_plugin(plugin)))
@@ -503,7 +517,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn runtime_config_store_is_loaded_on_initialize() {
-        let config_store = MemoryConfigStore::with_config(json!({ "version": 1, "cpex": { "plugins": [] } }));
+        let config_store = MemoryConfigStore::with_config(config_document(json!({ "plugins": [] })));
         let runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store.clone()));
 
         let handle = runtime.initialize().await.expect("runtime initializes");
@@ -514,7 +528,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn invalid_runtime_plugin_config_documents_are_rejected() {
-        for config in [json!({ "version": 2, "cpex": { "plugins": [] } }), json!({ "plugins": [] })] {
+        for config in [RuntimePluginConfigDocument { version: 2, cpex: CpexConfig::default() }] {
             let runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(config)));
             let error = runtime.initialize().await.expect_err("invalid config is rejected");
 
@@ -536,10 +550,8 @@ mod tests {
             }),
             json!({ "plugins": [{ "name": "llm", "kind": "test", "hooks": [cmf_hook_names::LLM_INPUT] }] }),
         ] {
-            let runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(json!({
-                "version": 1,
-                "cpex": cpex
-            }))));
+            let runtime =
+                CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(config_document(cpex))));
             let error = runtime.initialize().await.expect_err("unsupported config is rejected");
 
             assert_eq!("runtime plugin config is unsupported", error.to_string());
@@ -561,16 +573,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn runtime_config_loads_generic_cmf_factory_plugin() {
-        let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(json!({
-            "version": 1,
-            "cpex": {
-                "plugins": [{
-                    "name": "generic-pre",
-                    "kind": "generic",
-                    "hooks": [cmf_hook_names::TOOL_PRE_INVOKE]
-                }]
-            }
-        }))));
+        let config = config_document(json!({
+            "plugins": [{
+                "name": "generic-pre",
+                "kind": "generic",
+                "hooks": [cmf_hook_names::TOOL_PRE_INVOKE]
+            }]
+        }));
+        let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(config)));
         runtime
             .register_factory("generic", Box::new(CmfPluginFactory::new(TestPlugin::rewrite_from_config)))
             .expect("test factory registers");
@@ -586,7 +596,7 @@ mod tests {
         let plugin =
             Arc::new(TestPlugin::new("configured-pre", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_rewrite());
         let observations = plugin.observations();
-        let config_store = MemoryConfigStore::with_config(json!({ "version": 1, "cpex": { "plugins": [] } }));
+        let config_store = MemoryConfigStore::with_config(config_document(json!({ "plugins": [] })));
         let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store.clone()));
         runtime
             .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
@@ -620,7 +630,7 @@ mod tests {
             .expect("test factory registers");
         runtime.initialize().await.expect("runtime initializes");
 
-        config_store.set_config(json!({ "version": 2, "cpex": { "plugins": [] } })).await;
+        config_store.set_config(RuntimePluginConfigDocument { version: 2, cpex: CpexConfig::default() }).await;
         runtime.reload().await.expect_err("invalid reload fails");
 
         let result = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre hook runs");
@@ -657,7 +667,7 @@ mod tests {
     async fn post_only_runtime_does_not_apply_new_post_hook_to_in_flight_call() {
         let plugin = Arc::new(TestPlugin::new("post", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_rewrite());
         let observations = plugin.observations();
-        let config_store = MemoryConfigStore::with_config(json!({ "version": 1, "cpex": { "plugins": [] } }));
+        let config_store = MemoryConfigStore::with_config(config_document(json!({ "plugins": [] })));
         let mut runtime = CpexRuntimeRegistry::with_config_store(Arc::new(config_store.clone()));
         runtime
             .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
@@ -701,7 +711,7 @@ mod tests {
         let plugin =
             Arc::new(TestPlugin::new("configured-pre", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_rewrite());
         let observations = plugin.observations();
-        let config_store = MemoryConfigStore::with_config(json!({ "version": 1, "cpex": { "plugins": [] } }));
+        let config_store = MemoryConfigStore::with_config(config_document(json!({ "plugins": [] })));
         let mut runtime =
             CpexRuntimeRegistry::with_config_store_interval(Arc::new(config_store.clone()), Duration::from_millis(10));
         runtime

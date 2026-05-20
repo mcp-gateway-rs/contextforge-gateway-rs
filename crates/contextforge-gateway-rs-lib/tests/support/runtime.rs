@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use cpex_core::config::CpexConfig;
-use serde_json::{Value, json};
+use serde_json::json;
 
 use super::{TestPlugin, TestPluginFactory};
 
@@ -43,19 +43,4 @@ fn cpex_config(plugins: &[Arc<TestPlugin>]) -> CpexConfig {
         }).collect::<Vec<_>>()
     }))
     .expect("test CPEX config parses")
-}
-
-pub(crate) fn plugin_config(plugins: &[Arc<TestPlugin>]) -> Value {
-    json!({
-        "version": 1,
-        "cpex": {
-            "plugins": plugins.iter().map(|plugin| {
-                json!({
-                    "name": plugin.config.name.clone(),
-                    "kind": plugin.config.kind.clone(),
-                    "hooks": plugin.config.hooks.clone(),
-                })
-            }).collect::<Vec<_>>()
-        }
-    })
 }
