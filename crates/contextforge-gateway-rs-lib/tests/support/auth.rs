@@ -6,6 +6,8 @@ use std::{
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde_json::json;
 
+const TEST_TOKEN_TTL_SECS: u64 = 60 * 60;
+
 pub(crate) fn token(user_id: &str) -> String {
     let key = EncodingKey::from_rsa_pem(&fs::read("../../assets/jwt.key").expect("jwt key")).expect("encoding key");
     let mut header = Header::new(Algorithm::RS256);
@@ -15,7 +17,7 @@ pub(crate) fn token(user_id: &str) -> String {
         "iss": "mcpgateway",
         "sub": user_id,
         "aud": "mcpgateway-api",
-        "exp": now + 3600,
+        "exp": now + TEST_TOKEN_TTL_SECS,
         "iat": now,
         "jti": "test-token",
         "token_use": "api",

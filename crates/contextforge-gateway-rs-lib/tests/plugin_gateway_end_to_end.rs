@@ -8,8 +8,8 @@ use rmcp::model::ErrorCode;
 use serde_json::Value;
 
 use support::{
-    TestPlugin, error_code, runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway, sum_request,
-    text,
+    POST_DENY_ERROR_CODE, PRE_DENY_ERROR_CODE, REWRITTEN_SUM_A, REWRITTEN_SUM_B, TestPlugin, error_code,
+    runtime_with_post, runtime_with_pre, runtime_with_pre_and_post, start_gateway, sum_request, text,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -41,10 +41,10 @@ async fn pre_hook_modifies_backend_arguments_without_rerouting_tool() {
     let service = gateway.connect("admin@example.com").await;
     let result = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap();
 
-    assert_eq!("30", text(&result));
+    assert_eq!((REWRITTEN_SUM_A + REWRITTEN_SUM_B).to_string(), text(&result));
     let backend_calls = gateway.backend_state.calls.lock().expect("backend calls lock poisoned");
     assert_eq!("sum", backend_calls[0].tool_name);
-    assert_eq!(Some(&Value::from(10)), backend_calls[0].args.as_ref().and_then(|args| args.get("a")));
+    assert_eq!(Some(&Value::from(REWRITTEN_SUM_A)), backend_calls[0].args.as_ref().and_then(|args| args.get("a")));
 
     let observations = observations.lock().expect("observations lock poisoned");
     assert_eq!(1, observations.pre_calls);
@@ -106,7 +106,7 @@ async fn pre_and_post_denials_return_plugin_error_codes() {
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
     let error = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap_err();
-    assert_eq!(ErrorCode(-32001), error_code(error));
+    assert_eq!(ErrorCode(PRE_DENY_ERROR_CODE), error_code(error));
     assert!(gateway.backend_state.calls.lock().expect("backend calls lock poisoned").is_empty());
 
     let post_plugin = Arc::new(TestPlugin::new("post-deny", vec![cmf_hook_names::TOOL_POST_INVOKE]).with_post_deny());
@@ -114,7 +114,7 @@ async fn pre_and_post_denials_return_plugin_error_codes() {
     let gateway = start_gateway("admin@example.com", true, runtime).await;
     let service = gateway.connect("admin@example.com").await;
     let error = service.call_tool(sum_request(format!("{}-sum", gateway.backend_name), 1, 2)).await.unwrap_err();
-    assert_eq!(ErrorCode(-32002), error_code(error));
+    assert_eq!(ErrorCode(POST_DENY_ERROR_CODE), error_code(error));
     assert_eq!(1, gateway.backend_state.calls.lock().expect("backend calls lock poisoned").len());
 }
 

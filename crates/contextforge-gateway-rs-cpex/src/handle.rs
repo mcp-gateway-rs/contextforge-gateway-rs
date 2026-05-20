@@ -24,7 +24,7 @@ use crate::{
     runtime::GatewayPluginRuntime,
 };
 
-const DEFAULT_CONFIG_WATCHER_INTERVAL: Duration = Duration::from_secs(600);
+const DEFAULT_CONFIG_WATCHER_INTERVAL: Duration = Duration::from_mins(10);
 
 pub struct CpexRuntimeRegistry {
     runtime: Arc<ArcSwap<GatewayPluginRuntime>>,
@@ -266,6 +266,15 @@ mod tests {
 
     use super::*;
 
+    const TEST_MISSING_CONTEXT_ERROR_CODE: i64 = -32003;
+    const TEST_REWRITTEN_SUM_A: i64 = 10;
+    const TEST_REWRITTEN_SUM_B: i64 = 20;
+    const TEST_SHUTDOWN_RETRY_COUNT: usize = 20;
+    const TEST_SHUTDOWN_RETRY_INTERVAL: Duration = Duration::from_millis(10);
+    const TEST_WATCHER_INTERVAL: Duration = Duration::from_millis(10);
+    const TEST_WATCHER_RETRY_COUNT: usize = 20;
+    const TEST_WATCHER_RETRY_INTERVAL: Duration = Duration::from_millis(20);
+
     #[derive(Clone, Default)]
     struct MemoryConfigStore {
         config: Arc<TokioMutex<Option<RuntimePluginConfigDocument>>>,
@@ -412,7 +421,7 @@ mod tests {
                         } else {
                             PluginResult::deny(
                                 PluginViolation::new("missing_context", "pre context missing")
-                                    .with_proto_error_code(-32003),
+                                    .with_proto_error_code(TEST_MISSING_CONTEXT_ERROR_CODE),
                             )
                         }
                     },
@@ -428,8 +437,10 @@ mod tests {
                             .iter_mut()
                             .find(|part| matches!(part, ContentPart::ToolCall { .. }))
                         {
-                            content.arguments =
-                                HashMap::from([("a".to_owned(), json!(10)), ("b".to_owned(), json!(20))]);
+                            content.arguments = HashMap::from([
+                                ("a".to_owned(), json!(TEST_REWRITTEN_SUM_A)),
+                                ("b".to_owned(), json!(TEST_REWRITTEN_SUM_B)),
+                            ]);
                         }
                         PluginResult::modify_payload(modified)
                     },
@@ -699,11 +710,11 @@ mod tests {
         config_store.clear_config().await;
         runtime.reload().await.expect("runtime reloads");
 
-        for _ in 0..20 {
+        for _ in 0..TEST_SHUTDOWN_RETRY_COUNT {
             if observations.lock().expect("observations lock poisoned").shutdown_calls > 0 {
                 return;
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::sleep(TEST_SHUTDOWN_RETRY_INTERVAL).await;
         }
         panic!("replaced runtime did not shut down");
     }
@@ -715,7 +726,7 @@ mod tests {
         let observations = plugin.observations();
         let config_store = MemoryConfigStore::with_config(config_document(json!({ "plugins": [] })));
         let mut runtime =
-            CpexRuntimeRegistry::with_config_store_interval(Arc::new(config_store.clone()), Duration::from_millis(10));
+            CpexRuntimeRegistry::with_config_store_interval(Arc::new(config_store.clone()), TEST_WATCHER_INTERVAL);
         runtime
             .register_factory("test", Box::new(TestPluginFactory::from_plugin(&plugin)))
             .expect("test factory registers");
@@ -723,13 +734,13 @@ mod tests {
         assert!(handle.is_some());
 
         config_store.set_config(plugin_config(&[Arc::clone(&plugin)])).await;
-        for _ in 0..20 {
+        for _ in 0..TEST_WATCHER_RETRY_COUNT {
             let result = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre hook runs");
             if matches!(result.arguments, ToolArgumentsUpdate::Replace(Some(_))) {
                 assert_eq!(1, observations.lock().expect("observations lock poisoned").pre_calls);
                 return;
             }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            tokio::time::sleep(TEST_WATCHER_RETRY_INTERVAL).await;
         }
         panic!("config watcher did not apply plugin config");
     }

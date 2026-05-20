@@ -17,6 +17,12 @@ use serde_json::json;
 
 use super::tool::text;
 
+pub(crate) const PRE_DENY_ERROR_CODE: i32 = -32001;
+pub(crate) const POST_DENY_ERROR_CODE: i32 = -32002;
+const MISSING_CONTEXT_ERROR_CODE: i32 = -32003;
+pub(crate) const REWRITTEN_SUM_A: i64 = 10;
+pub(crate) const REWRITTEN_SUM_B: i64 = 20;
+
 #[derive(Default)]
 pub(crate) struct Observations {
     pub(crate) pre_calls: usize,
@@ -187,16 +193,17 @@ impl HookHandler<CmfHook> for TestPlugin {
                     }
                     PluginResult::modify_payload(modified)
                 },
-                PostBehavior::Deny => {
-                    PluginResult::deny(PluginViolation::new("post_denied", "post denied").with_proto_error_code(-32002))
-                },
+                PostBehavior::Deny => PluginResult::deny(
+                    PluginViolation::new("post_denied", "post denied")
+                        .with_proto_error_code(i64::from(POST_DENY_ERROR_CODE)),
+                ),
                 PostBehavior::RequireContext => {
                     if ctx.get_global("pre_seen") == Some(&json!(true)) {
                         PluginResult::allow()
                     } else {
                         PluginResult::deny(
                             PluginViolation::new("missing_context", "pre context missing")
-                                .with_proto_error_code(-32003),
+                                .with_proto_error_code(i64::from(MISSING_CONTEXT_ERROR_CODE)),
                         )
                     }
                 },
@@ -210,13 +217,17 @@ impl HookHandler<CmfHook> for TestPlugin {
                         modified.message.content.iter_mut().find(|part| matches!(part, ContentPart::ToolCall { .. }))
                     {
                         "echo".clone_into(&mut content.name);
-                        content.arguments = HashMap::from([("a".to_owned(), json!(10)), ("b".to_owned(), json!(20))]);
+                        content.arguments = HashMap::from([
+                            ("a".to_owned(), json!(REWRITTEN_SUM_A)),
+                            ("b".to_owned(), json!(REWRITTEN_SUM_B)),
+                        ]);
                     }
                     PluginResult::modify_payload(modified)
                 },
-                PreBehavior::Deny => {
-                    PluginResult::deny(PluginViolation::new("pre_denied", "pre denied").with_proto_error_code(-32001))
-                },
+                PreBehavior::Deny => PluginResult::deny(
+                    PluginViolation::new("pre_denied", "pre denied")
+                        .with_proto_error_code(i64::from(PRE_DENY_ERROR_CODE)),
+                ),
                 PreBehavior::InvalidArgs => {
                     PluginResult::modify_payload(MessagePayload { message: Message::text(Role::User, "invalid") })
                 },

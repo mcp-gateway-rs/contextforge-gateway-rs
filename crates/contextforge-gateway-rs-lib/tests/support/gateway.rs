@@ -31,6 +31,9 @@ use tokio::sync::Mutex as TokioMutex;
 use super::{MemoryUserConfigStore, token};
 
 static GATEWAY_PORT_LOCK: OnceLock<Arc<TokioMutex<()>>> = OnceLock::new();
+const CLIENT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+const GATEWAY_PORT_READY_TIMEOUT: Duration = Duration::from_secs(10);
+const TEST_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 #[derive(Clone)]
 pub(crate) struct BackendObservation {
@@ -106,7 +109,7 @@ impl RunningGateway {
         &self,
         user: &str,
     ) -> rmcp::service::RunningService<rmcp::RoleClient, InitializeRequestParams> {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + CLIENT_CONNECT_TIMEOUT;
         loop {
             let mut headers = HeaderMap::new();
             headers.insert(
@@ -122,7 +125,7 @@ impl RunningGateway {
                 Ok(service) => return service,
                 Err(error) if Instant::now() < deadline => {
                     let _ = error;
-                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    tokio::time::sleep(TEST_POLL_INTERVAL).await;
                 },
                 Err(error) => panic!("gateway service starts: {error:?}"),
             }
@@ -224,13 +227,13 @@ async fn start_gateway_with_runtime(
 }
 
 async fn wait_for_gateway_port(port: u16) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + GATEWAY_PORT_READY_TIMEOUT;
     loop {
         match tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
             Ok(_) => return,
             Err(error) if Instant::now() < deadline => {
                 let _ = error;
-                tokio::time::sleep(Duration::from_millis(20)).await;
+                tokio::time::sleep(TEST_POLL_INTERVAL).await;
             },
             Err(error) => panic!("gateway TCP listener starts: {error:?}"),
         }
