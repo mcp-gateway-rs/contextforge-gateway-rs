@@ -5,10 +5,6 @@ use std::{
 
 use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use contextforge_gateway_rs_lib::{Config, Gateway};
-use futures::{
-    FutureExt,
-    future::{BoxFuture, join_all},
-};
 use tokio::runtime::{Builder, LocalOptions};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
@@ -172,23 +168,13 @@ impl Runtime {
         }
     }
 
-    fn run_gateway(gateway: Gateway) -> BoxFuture<'static, contextforge_gateway_rs_lib::Result<()>> {
-        async {
-            let _ = join_all(vec![
-                async {
-                    let res = gateway.run_gateway().await;
-                    if res.is_ok() {
-                        debug!("Gateway process terminated");
-                    } else {
-                        error!("Gateway process terminated {res:?}");
-                    }
-                }
-                .boxed(),
-            ])
-            .await;
-
-            Ok(())
+    async fn run_gateway(gateway: Gateway) -> contextforge_gateway_rs_lib::Result<()> {
+        let res = gateway.run_gateway().await;
+        if res.is_ok() {
+            debug!("Gateway process terminated");
+        } else {
+            error!("Gateway process terminated {res:?}");
         }
-        .boxed()
+        Ok(())
     }
 }
