@@ -13,12 +13,12 @@ use cpex_core::{
 };
 use rmcp::{
     ErrorData,
-    model::{CallToolRequestParams, CallToolResult},
+    model::{CallToolRequestParams, CallToolResult, ErrorCode},
 };
 use tokio::task::JoinHandle;
 
 use crate::{
-    config::{RedisRuntimePluginConfigStore, RuntimePluginConfigDocument, RuntimePluginConfigStore},
+    config::{LoadedRuntimePluginConfig, RedisRuntimePluginConfigStore, RuntimePluginConfigStore},
     error::GatewayPluginRuntimeError,
     hooks::{RuntimeHookError, RuntimeHookState, ToolPreCallResult},
     runtime::GatewayPluginRuntime,
@@ -27,7 +27,7 @@ use crate::{
 const DEFAULT_CONFIG_WATCHER_INTERVAL: Duration = Duration::from_mins(10);
 
 pub struct CpexRuntimeRegistry {
-    runtime: Arc<ArcSwap<GatewayPluginRuntime>>,
+    runtime: Arc<ArcSwap<RuntimeState>>,
     config_store: Option<Arc<dyn RuntimePluginConfigStore>>,
     factories: Arc<PluginFactoryRegistry>,
     watcher_started: AtomicBool,
@@ -36,7 +36,7 @@ pub struct CpexRuntimeRegistry {
 
 #[derive(Clone)]
 pub struct GatewayPluginRuntimeHandle {
-    runtime: Arc<ArcSwap<GatewayPluginRuntime>>,
+    runtime: Arc<ArcSwap<RuntimeState>>,
 }
 
 struct RegistryToolCallState {
@@ -44,10 +44,15 @@ struct RegistryToolCallState {
     state: Option<RuntimeHookState>,
 }
 
+enum RuntimeState {
+    Active(Arc<GatewayPluginRuntime>),
+    Failed(String),
+}
+
 impl Default for CpexRuntimeRegistry {
     fn default() -> Self {
         Self {
-            runtime: Arc::new(ArcSwap::from_pointee(GatewayPluginRuntime::default())),
+            runtime: Arc::new(ArcSwap::from_pointee(RuntimeState::Active(Arc::new(GatewayPluginRuntime::default())))),
             config_store: None,
             factories: Arc::new(PluginFactoryRegistry::new()),
             watcher_started: AtomicBool::new(false),
@@ -100,25 +105,35 @@ impl CpexRuntimeRegistry {
                     break;
                 };
                 match config_store.get_config().await {
-                    Ok(config) => {
-                        let fingerprint = match config_fingerprint(config.as_ref()) {
-                            Ok(fingerprint) if fingerprint == last_applied_config => continue,
-                            Ok(fingerprint) => fingerprint,
-                            Err(error) => {
-                                tracing::warn!(%error, "failed to reload CPEX runtime plugin config");
-                                continue;
-                            },
-                        };
-                        let result = match config_to_cpex(config.as_ref()) {
+                    Ok(Some(config)) => {
+                        if last_applied_config.as_ref() == Some(&config.fingerprint) {
+                            continue;
+                        }
+                        let fingerprint = config.fingerprint.clone();
+                        let result = match config_to_cpex(&config) {
                             Ok(config) => apply_runtime_config(&runtime, &factories, config).await,
                             Err(error) => Err(error),
                         };
                         match result {
-                            Ok(()) => last_applied_config = fingerprint,
-                            Err(error) => tracing::warn!(%error, "failed to reload CPEX runtime plugin config"),
+                            Ok(()) => last_applied_config = Some(fingerprint),
+                            Err(error) => {
+                                tracing::warn!(%error, "failed to reload CPEX runtime plugin config");
+                                set_runtime_failed(&runtime, &error);
+                                last_applied_config = None;
+                            },
                         }
                     },
-                    Err(error) => tracing::warn!(%error, "failed to load CPEX runtime plugin config"),
+                    Ok(None) => {
+                        let error = GatewayPluginRuntimeError::ConfigMissing;
+                        tracing::warn!(%error, "failed to reload CPEX runtime plugin config");
+                        set_runtime_failed(&runtime, &error);
+                        last_applied_config = None;
+                    },
+                    Err(error) => {
+                        tracing::warn!(%error, "failed to load CPEX runtime plugin config");
+                        set_runtime_failed(&runtime, &error);
+                        last_applied_config = None;
+                    },
                 }
             }
         }))
@@ -126,31 +141,27 @@ impl CpexRuntimeRegistry {
 }
 
 async fn reload_runtime(
-    runtime: &ArcSwap<GatewayPluginRuntime>,
+    runtime: &ArcSwap<RuntimeState>,
     config_store: Option<&Arc<dyn RuntimePluginConfigStore>>,
     factories: &PluginFactoryRegistry,
 ) -> Result<Option<Vec<u8>>, GatewayPluginRuntimeError> {
     let Some(config_store) = config_store else {
         return Ok(None);
     };
-    let config = config_store.get_config().await?;
-    apply_runtime_config(runtime, factories, config_to_cpex(config.as_ref())?).await?;
-    config_fingerprint(config.as_ref())
+    match load_runtime_config(config_store, factories).await {
+        Ok((config, fingerprint)) => {
+            drop(runtime.swap(Arc::new(RuntimeState::Active(Arc::new(config)))));
+            Ok(fingerprint)
+        },
+        Err(error) => {
+            set_runtime_failed(runtime, &error);
+            Err(error)
+        },
+    }
 }
 
-fn config_to_cpex(
-    config: Option<&RuntimePluginConfigDocument>,
-) -> Result<Option<CpexConfig>, GatewayPluginRuntimeError> {
-    let Some(config) = config else {
-        return Ok(None);
-    };
-    config.cpex_config().map(Some)
-}
-
-fn config_fingerprint(
-    config: Option<&RuntimePluginConfigDocument>,
-) -> Result<Option<Vec<u8>>, GatewayPluginRuntimeError> {
-    config.map(serde_json::to_vec).transpose().map_err(|_| GatewayPluginRuntimeError::ConfigWrongFormat)
+fn config_to_cpex(config: &LoadedRuntimePluginConfig) -> Result<Option<CpexConfig>, GatewayPluginRuntimeError> {
+    config.document.cpex_config().map(Some)
 }
 
 #[cfg(test)]
@@ -183,16 +194,37 @@ impl CpexRuntimeRegistry {
 }
 
 async fn apply_runtime_config(
-    runtime: &ArcSwap<GatewayPluginRuntime>,
+    runtime: &ArcSwap<RuntimeState>,
     factories: &PluginFactoryRegistry,
     config: Option<CpexConfig>,
 ) -> Result<(), GatewayPluginRuntimeError> {
     let Some(config) = config else {
-        drop(runtime.swap(Arc::new(GatewayPluginRuntime::default())));
+        drop(runtime.swap(Arc::new(RuntimeState::Active(Arc::new(GatewayPluginRuntime::default())))));
         return Ok(());
     };
-    drop(runtime.swap(Arc::new(GatewayPluginRuntime::from_config(config, factories).await?)));
+    drop(
+        runtime.swap(Arc::new(RuntimeState::Active(Arc::new(
+            GatewayPluginRuntime::from_config(config, factories).await?,
+        )))),
+    );
     Ok(())
+}
+
+async fn load_runtime_config(
+    config_store: &Arc<dyn RuntimePluginConfigStore>,
+    factories: &PluginFactoryRegistry,
+) -> Result<(GatewayPluginRuntime, Option<Vec<u8>>), GatewayPluginRuntimeError> {
+    let config = config_store.get_config().await?.ok_or(GatewayPluginRuntimeError::ConfigMissing)?;
+    let fingerprint = Some(config.fingerprint.clone());
+    let runtime = match config_to_cpex(&config)? {
+        Some(config) => GatewayPluginRuntime::from_config(config, factories).await?,
+        None => GatewayPluginRuntime::default(),
+    };
+    Ok((runtime, fingerprint))
+}
+
+fn set_runtime_failed(runtime: &ArcSwap<RuntimeState>, error: &GatewayPluginRuntimeError) {
+    drop(runtime.swap(Arc::new(RuntimeState::Failed(error.to_string()))));
 }
 
 impl CpexRuntimeRegistry {
@@ -203,7 +235,7 @@ impl CpexRuntimeRegistry {
 }
 
 impl GatewayPluginRuntimeHandle {
-    fn current(&self) -> Arc<GatewayPluginRuntime> {
+    fn current(&self) -> Arc<RuntimeState> {
         self.runtime.load_full()
     }
 
@@ -213,11 +245,14 @@ impl GatewayPluginRuntimeHandle {
         tool_name: &str,
         backend_name: &str,
     ) -> Result<ToolPreCallResult, ErrorData> {
-        let runtime = self.current();
+        let state = self.current();
+        let RuntimeState::Active(runtime) = state.as_ref() else {
+            return Err(runtime_failed_error(state.as_ref()));
+        };
         let mut result = runtime.before_tool_call(request, tool_name, backend_name).await?;
         if runtime.has_post_hook() {
             let state = result.state.take();
-            result.state = Some(Box::new(RegistryToolCallState { runtime, state }));
+            result.state = Some(Box::new(RegistryToolCallState { runtime: Arc::clone(runtime), state }));
         } else {
             result.state = None;
         }
@@ -235,6 +270,13 @@ impl GatewayPluginRuntimeHandle {
             None => Ok(response),
         }
     }
+}
+
+fn runtime_failed_error(state: &RuntimeState) -> ErrorData {
+    if let RuntimeState::Failed(error) = state {
+        tracing::warn!(%error, "rejecting tool call because CPEX runtime is failed");
+    }
+    ErrorData { code: ErrorCode::INTERNAL_ERROR, message: "Runtime plugin reload failed".into(), data: None }
 }
 
 #[cfg(test)]
@@ -262,6 +304,7 @@ mod tests {
     use serde_json::{Value, json};
     use tokio::sync::Mutex as TokioMutex;
 
+    use crate::config::{LoadedRuntimePluginConfig, RuntimePluginConfigDocument};
     use crate::{CmfPluginFactory, ToolArgumentsUpdate};
 
     use super::*;
@@ -301,9 +344,9 @@ mod tests {
 
     #[async_trait]
     impl RuntimePluginConfigStore for MemoryConfigStore {
-        async fn get_config(&self) -> Result<Option<RuntimePluginConfigDocument>, GatewayPluginRuntimeError> {
+        async fn get_config(&self) -> Result<Option<LoadedRuntimePluginConfig>, GatewayPluginRuntimeError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(self.config.lock().await.clone())
+            Ok(self.config.lock().await.clone().map(loaded_config))
         }
     }
 
@@ -507,6 +550,11 @@ mod tests {
         RuntimePluginConfigDocument { version: 1, cpex: serde_json::from_value(cpex).expect("test CPEX config parses") }
     }
 
+    fn loaded_config(document: RuntimePluginConfigDocument) -> LoadedRuntimePluginConfig {
+        let fingerprint = serde_json::to_vec(&document).expect("test CPEX config serializes");
+        LoadedRuntimePluginConfig { document, fingerprint }
+    }
+
     fn plugin_config(plugins: &[Arc<TestPlugin>]) -> RuntimePluginConfigDocument {
         config_document(json!({
             "plugins": plugins.iter().map(|plugin| {
@@ -517,6 +565,13 @@ mod tests {
                 })
             }).collect::<Vec<_>>()
         }))
+    }
+
+    fn expect_runtime_failed(result: Result<ToolPreCallResult, ErrorData>) -> ErrorData {
+        match result {
+            Ok(_) => panic!("runtime should be failed"),
+            Err(error) => error,
+        }
     }
 
     async fn runtime_with_plugin(plugin: &Arc<TestPlugin>, config: RuntimePluginConfigDocument) -> CpexRuntimeRegistry {
@@ -540,6 +595,15 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn missing_runtime_plugin_config_is_rejected_on_initialize() {
+        let runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::default()));
+
+        let error = runtime.initialize().await.expect_err("missing config is rejected");
+
+        assert_eq!("runtime plugin config is missing", error.to_string());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn invalid_runtime_plugin_config_documents_are_rejected() {
         for config in [RuntimePluginConfigDocument { version: 2, cpex: CpexConfig::default() }] {
             let runtime = CpexRuntimeRegistry::with_config_store(Arc::new(MemoryConfigStore::with_config(config)));
@@ -553,6 +617,7 @@ mod tests {
     async fn unsupported_runtime_plugin_config_is_rejected() {
         for cpex in [
             json!({ "plugin_settings": { "routing_enabled": true }, "plugins": [] }),
+            json!({ "plugin_settings": { "fail_on_plugin_error": true }, "plugins": [] }),
             json!({
                 "plugins": [{
                     "name": "scoped",
@@ -624,7 +689,7 @@ mod tests {
         let result = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre hook runs");
         assert!(matches!(result.arguments, ToolArgumentsUpdate::Replace(Some(_))));
 
-        config_store.clear_config().await;
+        config_store.set_config(config_document(json!({ "plugins": [] }))).await;
         runtime.reload().await.expect("runtime reloads");
         let result = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre hook skips");
         assert!(matches!(result.arguments, ToolArgumentsUpdate::Unchanged));
@@ -632,7 +697,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn failed_runtime_reload_keeps_current_runtime() {
+    async fn failed_runtime_reload_rejects_new_calls_until_valid_reload() {
         let plugin =
             Arc::new(TestPlugin::new("configured-pre", vec![cmf_hook_names::TOOL_PRE_INVOKE]).with_pre_rewrite());
         let observations = plugin.observations();
@@ -645,7 +710,18 @@ mod tests {
 
         config_store.set_config(RuntimePluginConfigDocument { version: 2, cpex: CpexConfig::default() }).await;
         runtime.reload().await.expect_err("invalid reload fails");
+        let error = expect_runtime_failed(runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await);
+        assert_eq!(ErrorCode::INTERNAL_ERROR, error.code);
+        assert_eq!("Runtime plugin reload failed", error.message);
 
+        config_store.clear_config().await;
+        runtime.reload().await.expect_err("missing reload fails");
+        let error = expect_runtime_failed(runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await);
+        assert_eq!(ErrorCode::INTERNAL_ERROR, error.code);
+        assert_eq!("Runtime plugin reload failed", error.message);
+
+        config_store.set_config(plugin_config(&[Arc::clone(&plugin)])).await;
+        runtime.reload().await.expect("runtime recovers");
         let result = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre hook runs");
         assert!(matches!(result.arguments, ToolArgumentsUpdate::Replace(Some(_))));
         assert_eq!(1, observations.lock().expect("observations lock poisoned").pre_calls);
@@ -666,7 +742,7 @@ mod tests {
         runtime.initialize().await.expect("runtime initializes");
 
         let pre = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre hook runs");
-        config_store.clear_config().await;
+        config_store.set_config(config_document(json!({ "plugins": [] }))).await;
         runtime.reload().await.expect("runtime reloads");
         let response = CallToolResult::success(vec![Content::text("3")]);
         runtime.after_tool_call("sum", response, pre.state).await.expect("post hook runs");
@@ -707,7 +783,7 @@ mod tests {
             .expect("test factory registers");
         runtime.initialize().await.expect("runtime initializes");
 
-        config_store.clear_config().await;
+        config_store.set_config(config_document(json!({ "plugins": [] }))).await;
         runtime.reload().await.expect("runtime reloads");
 
         for _ in 0..TEST_SHUTDOWN_RETRY_COUNT {
@@ -737,8 +813,22 @@ mod tests {
         for _ in 0..TEST_WATCHER_RETRY_COUNT {
             let result = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await.expect("pre hook runs");
             if matches!(result.arguments, ToolArgumentsUpdate::Replace(Some(_))) {
-                assert_eq!(1, observations.lock().expect("observations lock poisoned").pre_calls);
-                return;
+                config_store.clear_config().await;
+                tokio::time::sleep(TEST_WATCHER_INTERVAL + TEST_WATCHER_RETRY_INTERVAL).await;
+                let error = expect_runtime_failed(runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await);
+                assert_eq!(ErrorCode::INTERNAL_ERROR, error.code);
+
+                config_store.set_config(plugin_config(&[Arc::clone(&plugin)])).await;
+                for _ in 0..TEST_WATCHER_RETRY_COUNT {
+                    if let Ok(result) = runtime.before_tool_call(&sum_request(1, 2), "sum", "backend").await
+                        && matches!(result.arguments, ToolArgumentsUpdate::Replace(Some(_)))
+                    {
+                        assert_eq!(2, observations.lock().expect("observations lock poisoned").pre_calls);
+                        return;
+                    }
+                    tokio::time::sleep(TEST_WATCHER_RETRY_INTERVAL).await;
+                }
+                panic!("config watcher did not recover from missing plugin config");
             }
             tokio::time::sleep(TEST_WATCHER_RETRY_INTERVAL).await;
         }

@@ -280,15 +280,6 @@ where
         let tool_name = tool_name.to_owned();
         let request_name = request.name.clone();
 
-        let pre_result = if let Some(plugin_runtime) = &self.plugin_runtime {
-            plugin_runtime.before_tool_call(&request, &tool_name, &backend_name).await?
-        } else {
-            ToolPreCallResult::unchanged()
-        };
-        let post_state = pre_result.state;
-        let mut routed_request = request;
-        pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
-
         let backend_transports = session_manager.borrow_transports().await;
         info!("Borrowed transports {session_id:?} {backend_transports:?}");
         let mut target_service = None;
@@ -328,6 +319,15 @@ where
                 data: None,
             });
         };
+
+        let pre_result = if let Some(plugin_runtime) = &self.plugin_runtime {
+            plugin_runtime.before_tool_call(&request, &tool_name, &backend_name).await?
+        } else {
+            ToolPreCallResult::unchanged()
+        };
+        let post_state = pre_result.state;
+        let mut routed_request = request;
+        pre_result.arguments.apply_to_request(&mut routed_request, &tool_name);
 
         let service_name = target_service.name.clone();
         let response = service.call_tool(routed_request).await;

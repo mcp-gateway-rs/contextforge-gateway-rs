@@ -14,7 +14,13 @@ const RUNTIME_PLUGIN_CONFIG_KEY: &str = "ContextForgeGatewayRuntimePluginConfig"
 
 #[async_trait]
 pub(crate) trait RuntimePluginConfigStore: Send + Sync {
-    async fn get_config(&self) -> Result<Option<RuntimePluginConfigDocument>, GatewayPluginRuntimeError>;
+    async fn get_config(&self) -> Result<Option<LoadedRuntimePluginConfig>, GatewayPluginRuntimeError>;
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct LoadedRuntimePluginConfig {
+    pub(crate) document: RuntimePluginConfigDocument,
+    pub(crate) fingerprint: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -58,7 +64,7 @@ impl RedisRuntimePluginConfigStore {
 
 #[async_trait]
 impl RuntimePluginConfigStore for RedisRuntimePluginConfigStore {
-    async fn get_config(&self) -> Result<Option<RuntimePluginConfigDocument>, GatewayPluginRuntimeError> {
+    async fn get_config(&self) -> Result<Option<LoadedRuntimePluginConfig>, GatewayPluginRuntimeError> {
         let mut connection = self.connection().await?;
 
         let maybe_config: Result<Option<Vec<u8>>, RedisError> =
@@ -68,7 +74,7 @@ impl RuntimePluginConfigStore for RedisRuntimePluginConfigStore {
         };
 
         let document = decode_config_document(&config)?;
-        Ok(Some(document))
+        Ok(Some(LoadedRuntimePluginConfig { document, fingerprint: config }))
     }
 }
 

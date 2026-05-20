@@ -19,6 +19,8 @@ pub enum GatewayPluginRuntimeError {
     ConfigStoreUnavailable,
     #[error("runtime plugin config is in wrong format")]
     ConfigWrongFormat,
+    #[error("runtime plugin config is missing")]
+    ConfigMissing,
     #[error("runtime plugin config is unsupported")]
     ConfigUnsupported,
     #[error("runtime plugin factories are already shared")]
@@ -32,6 +34,7 @@ impl fmt::Debug for GatewayPluginRuntimeError {
             Self::Initialization { .. } => formatter.write_str("Initialization"),
             Self::ConfigStoreUnavailable => formatter.write_str("ConfigStoreUnavailable"),
             Self::ConfigWrongFormat => formatter.write_str("ConfigWrongFormat"),
+            Self::ConfigMissing => formatter.write_str("ConfigMissing"),
             Self::ConfigUnsupported => formatter.write_str("ConfigUnsupported"),
             Self::FactoryRegistryShared => formatter.write_str("FactoryRegistryShared"),
         }

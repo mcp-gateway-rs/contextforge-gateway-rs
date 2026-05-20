@@ -14,7 +14,7 @@ docker compose -f docker/docker-compose-local.yaml ps redis gateway-one gateway-
 
 2. Run gateway
 ```bash 
-    cargo run --bin contextforge-gateway-rs -- --address 0.0.0.0:8001 --redis-port 6380 --redis-address 127.0.0.1 --token-verification-public-key assets/jwt.key.pub  --token-verification-private-key assets/jwt.key --number-of-cpus 16 --redis-mode=plain-text --upstream-connection-mode=plain-text-or-tls
+    cargo run --bin contextforge-gateway-rs -- --address 0.0.0.0:8001 --redis-port 6379 --redis-address 127.0.0.1 --token-verification-public-key assets/jwt.key.pub  --token-verification-private-key assets/jwt.key --number-of-cpus 16 --redis-mode=plain-text --upstream-connection-mode=plain-text-or-tls
 ```
 
 This should spin up Redis instance and two mcp-gateways: a simple counter and a conformance test server from mcp-rust-sdk
@@ -59,7 +59,7 @@ Runtime CPEX plugins are disabled by default. Enable hook execution when startin
 ```bash
 cargo run --release --bin contextforge-gateway-rs -- \
   --address 0.0.0.0:8001 \
-  --redis-port 6380 \
+  --redis-port 6379 \
   --redis-address 127.0.0.1 \
   --token-verification-public-key assets/jwt.key.pub \
   --token-verification-private-key assets/jwt.key \
@@ -69,7 +69,7 @@ cargo run --release --bin contextforge-gateway-rs -- \
   --runtime-plugins-enabled true
 ```
 
-Plugin configuration is stored in Redis at key `ContextForgeGatewayRuntimePluginConfig`. The value can be JSON or MessagePack with `version: 1` and `cpex` containing the CPEX config. The gateway reloads that key while running, builds a new initialized CPEX runtime, and swaps the runtime registry to the new immutable `PluginManager`. The existing `PluginManager` is not mutated after initialization.
+Plugin configuration is stored in Redis at key `ContextForgeGatewayRuntimePluginConfig`. The value can be JSON or MessagePack with `version: 1` and `cpex` containing the CPEX config. When runtime plugins are enabled with Redis config, this key must exist before startup. The gateway reloads that key while running, builds a new initialized CPEX runtime, and swaps the runtime registry to the new immutable `PluginManager`. The existing `PluginManager` is not mutated after initialization.
 
 This integration currently passes only tool payloads. CPEX configs that enable route-based plugin selection, plugin directories, global policies/defaults, non-tool hooks, or plugin conditions are rejected in this PR. Redis write access to this key is a control-plane trust boundary because it controls which registered hooks run.
 
@@ -100,6 +100,23 @@ Check Redis and backend status:
 docker compose -f docker/docker-compose-local.yaml ps redis gateway-one gateway-two
 ```
 
+Register the payload marker config in Redis before starting the enabled gateway:
+
+```bash
+docker compose -f docker/docker-compose-local.yaml exec -T redis redis-cli SET ContextForgeGatewayRuntimePluginConfig '{
+  "version": 1,
+  "cpex": {
+    "plugins": [
+      {
+        "name": "payload-marker",
+        "kind": "contextforge/payload-marker",
+        "hooks": ["cmf.tool_post_invoke"]
+      }
+    ]
+  }
+}'
+```
+
 Run only one gateway process on port `8001` at a time. Stop the current gateway with `Ctrl-C` before switching between disabled and enabled plugin runs.
 
 Start the gateway with runtime plugins disabled for a baseline run:
@@ -107,7 +124,7 @@ Start the gateway with runtime plugins disabled for a baseline run:
 ```bash
 CARGO_NET_GIT_FETCH_WITH_CLI=true cargo run --release --features test-plugins --bin contextforge-gateway-rs -- \
   --address 0.0.0.0:8001 \
-  --redis-port 6380 \
+  --redis-port 6379 \
   --redis-address 127.0.0.1 \
   --token-verification-public-key assets/jwt.key.pub \
   --token-verification-private-key assets/jwt.key \
@@ -122,7 +139,7 @@ Start the gateway with runtime plugins enabled for the marker run:
 ```bash
 CARGO_NET_GIT_FETCH_WITH_CLI=true cargo run --release --features test-plugins --bin contextforge-gateway-rs -- \
   --address 0.0.0.0:8001 \
-  --redis-port 6380 \
+  --redis-port 6379 \
   --redis-address 127.0.0.1 \
   --token-verification-public-key assets/jwt.key.pub \
   --token-verification-private-key assets/jwt.key \
@@ -157,27 +174,6 @@ curl --silent --show-error --request POST \
       }
     }
   }'
-```
-
-Register the payload marker config in Redis:
-
-```bash
-docker compose -f docker/docker-compose-local.yaml exec -T redis redis-cli SET ContextForgeGatewayRuntimePluginConfig '{
-  "version": 1,
-  "cpex": {
-    "plugins": [
-      {
-        "name": "payload-marker",
-        "kind": "contextforge/payload-marker",
-        "hooks": ["cmf.tool_post_invoke"]
-      }
-    ]
-  }
-}'
-```
-
-```bash
-sleep 3
 ```
 
 Open an MCP session:

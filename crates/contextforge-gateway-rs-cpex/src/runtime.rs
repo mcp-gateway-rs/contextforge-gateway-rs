@@ -79,6 +79,7 @@ impl Drop for GatewayPluginRuntime {
 
 fn validate_gateway_supported_config(config: &CpexConfig) -> Result<(), GatewayPluginRuntimeError> {
     if config.routing_enabled()
+        || config.plugin_settings.fail_on_plugin_error
         || !config.routes.is_empty()
         || !config.plugin_dirs.is_empty()
         || !config.global.policies.is_empty()
