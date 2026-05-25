@@ -109,7 +109,7 @@ impl Gateway {
                 hmac_sha: config
                     .token_verification_secret
                     .as_ref()
-                    .map(|token| DecodingKey::from_secret(token.as_bytes())),
+                    .map(|token| DecodingKey::from_secret(token.value().as_bytes())),
             },
 
             config_store: Arc::clone(&user_config_store),

@@ -581,6 +581,7 @@ dependencies = [
  "rmp-serde",
  "rustls",
  "rustls-pki-types",
+ "secret-string",
  "serde",
  "serde_json",
  "test-log",
@@ -3027,6 +3028,12 @@ dependencies = [
  "subtle",
  "zeroize",
 ]
+
+[[package]]
+name = "secret-string"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "068d960589a13890bdb2a9ea5e7ae0974b89249101117f2e9a5e166bf3af44b9"
 
 [[package]]
 name = "security-framework"

@@ -11,6 +11,7 @@ use http::uri::Authority;
 use jsonwebtoken::DecodingKey;
 use redis::{ConnectionAddr, IntoConnectionInfo, RedisError};
 use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer, pem::PemObject};
+use secret_string::SecretString;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use typed_builder::TypedBuilder;
@@ -136,7 +137,7 @@ pub struct Config {
     pub token_verification_private_key: PathBuf,
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_TOKEN_SECRET")]
-    pub token_verification_secret: Option<String>,
+    pub token_verification_secret: Option<SecretString<String>>,
 
     #[arg(long, env = "CONTEXTFORGE_GATEWAY_RS_ENABLE_OPEN_TELEMETRY")]
     pub enable_open_telemetry: Option<bool>,
