@@ -81,14 +81,16 @@ mod test {
 
     use async_trait::async_trait;
     use axum::{Router, body::Body, middleware, response::Response, routing::get};
+    use chrono::Duration;
     use contextforge_gateway_rs_apis::{User, user_store::UserConfig};
     use http::{HeaderMap, Request, StatusCode};
     use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, encode};
     use tower::ServiceExt;
+    use uuid::Uuid;
 
     use crate::{
         Config,
-        common::{ContextForgeClaims, ContextForgeGatewayAppState, JwtTokenDecoders},
+        common::{self, ContextForgeClaims, ContextForgeGatewayAppState, JwtTokenDecoders, Scopes},
         const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
         layers::claims_id::claims_layer,
         user_config_store::{ConfigStoreError, UserConfigStore},
@@ -166,7 +168,33 @@ mod test {
             Response::builder().status(StatusCode::OK).body(Body::empty()).expect("Expecting this to work")
         }
 
-        let mut claims = ContextForgeClaims::new("blah@blah.com");
+        let start = std::time::SystemTime::now();
+        let now = start.duration_since(std::time::UNIX_EPOCH).expect("Time went backwards").as_secs();
+
+        let user_id = "blah@blah.com".to_owned();
+        let mut claims = ContextForgeClaims {
+            iss: CONTEXT_FORGE_GATEWAY_ISSUER.to_owned(),
+            sub: user_id.clone(),
+            aud: CONTEXT_FORGE_GATEWAY_AUDIENCE.to_owned(),
+            exp: now + Duration::hours(1).num_seconds().cast_unsigned(),
+            iat: Some(now),
+            jti: Uuid::new_v4().to_string(),
+            token_use: "api".to_owned(),
+            teams: Some(vec!["team_awesome".to_owned()]),
+            user: common::User::builder()
+                .email(user_id)
+                .auth_provider("api_token".to_owned())
+                .full_name("API Token User".to_owned())
+                .is_admin(true)
+                .build(),
+            scopes: Scopes::builder()
+                .server_id(Some("my_id".to_owned()))
+                .ip_restrictions(vec!["192.169.1.0/24".to_owned()])
+                .permissions(vec!["tools.read".to_owned(), "servers.use".to_owned()])
+                .time_restrictions(None)
+                .build(),
+        };
+
         claims.exp = 0;
         let token = get_token_for_claims(&claims);
 

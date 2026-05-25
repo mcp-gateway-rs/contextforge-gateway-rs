@@ -7,11 +7,46 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{Router, get, post},
 };
+use chrono::Duration;
 use contextforge_gateway_rs_apis::{User as CFUser, user_store::UserConfig};
 use http::{StatusCode, header};
+use uuid::Uuid;
 
 //use tracing::debug;
-use crate::common::{ContextForgeClaims, ContextForgeGatewayAppState};
+use crate::{
+    common::{ContextForgeClaims, ContextForgeGatewayAppState, Scopes, User},
+    const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
+};
+
+impl ContextForgeClaims {
+    pub fn new(user_id: &str) -> Self {
+        let audience = CONTEXT_FORGE_GATEWAY_AUDIENCE.to_owned();
+        let start = std::time::SystemTime::now();
+        let now = start.duration_since(std::time::UNIX_EPOCH).expect("Time went backwards").as_secs();
+        Self {
+            iss: CONTEXT_FORGE_GATEWAY_ISSUER.to_owned(),
+            sub: user_id.to_owned(),
+            aud: audience,
+            exp: now + Duration::hours(1).num_seconds().cast_unsigned(),
+            iat: Some(now),
+            jti: Uuid::new_v4().to_string(),
+            token_use: "api".to_owned(),
+            teams: Some(vec!["team_awesome".to_owned()]),
+            user: User::builder()
+                .email(user_id.to_owned())
+                .auth_provider("api_token".to_owned())
+                .full_name("API Token User".to_owned())
+                .is_admin(true)
+                .build(),
+            scopes: Scopes::builder()
+                .server_id(Some("my_id".to_owned()))
+                .ip_restrictions(vec!["192.169.1.0/24".to_owned()])
+                .permissions(vec!["tools.read".to_owned(), "servers.use".to_owned()])
+                .time_restrictions(None)
+                .build(),
+        }
+    }
+}
 
 pub fn add_tools(router: Router<ContextForgeGatewayAppState>) -> Router<ContextForgeGatewayAppState> {
     router

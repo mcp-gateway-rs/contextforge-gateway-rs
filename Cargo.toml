@@ -21,9 +21,7 @@ repository = "https://github.com/contextforge-gateway-rs/contextforge-gateway-rs
 
 [workspace.dependencies]
 contextforge-gateway-rs-cpex = { path = "./crates/contextforge-gateway-rs-cpex" }
-contextforge-gateway-rs-lib = { path = "./crates/contextforge-gateway-rs-lib", features = [
-    "with_tools",
-] }
+contextforge-gateway-rs-lib = { path = "./crates/contextforge-gateway-rs-lib" }
 contextforge-gateway-rs-apis = { path = "./crates/contextforge-gateway-rs-apis"}
 rmcp = { version = "1.6.0", features = [
     "server",
