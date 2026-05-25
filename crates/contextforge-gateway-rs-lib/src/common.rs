@@ -6,7 +6,6 @@ use std::{
     sync::Arc,
 };
 
-use chrono::Duration;
 use clap::{Parser, ValueEnum};
 use http::uri::Authority;
 use jsonwebtoken::DecodingKey;
@@ -15,12 +14,8 @@ use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer, pem::PemObject};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use typed_builder::TypedBuilder;
-use uuid::Uuid;
 
-use crate::{
-    const_values::{CONTEXT_FORGE_GATEWAY_AUDIENCE, CONTEXT_FORGE_GATEWAY_ISSUER},
-    user_config_store::UserConfigStore,
-};
+use crate::user_config_store::UserConfigStore;
 
 #[derive(Clone)]
 pub struct JwtTokenDecoders {
@@ -28,6 +23,7 @@ pub struct JwtTokenDecoders {
     pub hmac_sha: Option<DecodingKey>,
 }
 
+#[allow(unused)]
 #[derive(Clone)]
 pub struct ContextForgeGatewayAppState {
     pub(crate) jwt_token_decoding_keys: JwtTokenDecoders,
@@ -63,36 +59,6 @@ pub struct ContextForgeClaims {
     pub teams: Option<Vec<String>>,
     pub user: User,
     pub scopes: Scopes,
-}
-
-impl ContextForgeClaims {
-    pub fn new(user_id: &str) -> Self {
-        let audience = CONTEXT_FORGE_GATEWAY_AUDIENCE.to_owned();
-        let start = std::time::SystemTime::now();
-        let now = start.duration_since(std::time::UNIX_EPOCH).expect("Time went backwards").as_secs();
-        Self {
-            iss: CONTEXT_FORGE_GATEWAY_ISSUER.to_owned(),
-            sub: user_id.to_owned(),
-            aud: audience,
-            exp: now + Duration::hours(1).num_seconds().cast_unsigned(),
-            iat: Some(now),
-            jti: Uuid::new_v4().to_string(),
-            token_use: "api".to_owned(),
-            teams: Some(vec!["team_awesome".to_owned()]),
-            user: User::builder()
-                .email(user_id.to_owned())
-                .auth_provider("api_token".to_owned())
-                .full_name("API Token User".to_owned())
-                .is_admin(true)
-                .build(),
-            scopes: Scopes::builder()
-                .server_id(Some("my_id".to_owned()))
-                .ip_restrictions(vec!["192.169.1.0/24".to_owned()])
-                .permissions(vec!["tools.read".to_owned(), "servers.use".to_owned()])
-                .time_restrictions(None)
-                .build(),
-        }
-    }
 }
 
 pub type RedisClient = redis::Client;
