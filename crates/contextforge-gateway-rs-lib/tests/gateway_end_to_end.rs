@@ -55,8 +55,10 @@ const MOCK_COUNTER_TOOL_NAMES: &[&str] = &[
 
 #[derive(Clone, Debug)]
 struct NotificationCapturingClient {
-    notifications: Arc<Mutex<Vec<CapturedNotification>>>,
+    notifications: CapturedNotifications,
 }
+
+type CapturedNotifications = Arc<Mutex<Vec<CapturedNotification>>>;
 
 #[derive(Clone, Debug)]
 enum CapturedNotification {
@@ -119,7 +121,7 @@ impl ClientHandler for NotificationCapturingClient {
 async fn notification_client(
     gateway_url: String,
     client: reqwest::Client,
-) -> Result<(RunningService<RoleClient, NotificationCapturingClient>, Arc<Mutex<Vec<CapturedNotification>>>)> {
+) -> Result<(RunningService<RoleClient, NotificationCapturingClient>, CapturedNotifications)> {
     let notifications = Arc::new(Mutex::new(Vec::new()));
     let service = NotificationCapturingClient { notifications: Arc::clone(&notifications) }
         .serve(StreamableHttpClientTransport::with_client(
@@ -128,6 +130,49 @@ async fn notification_client(
         ))
         .await?;
     Ok((service, notifications))
+}
+
+fn clear_notifications(notifications: &CapturedNotifications) {
+    notifications.lock().expect("notification lock should not be poisoned").clear();
+}
+
+fn notifications_contain<F>(notifications: &CapturedNotifications, predicate: F) -> bool
+where
+    F: FnMut(&CapturedNotification) -> bool,
+{
+    notifications.lock().expect("notification lock should not be poisoned").iter().any(predicate)
+}
+
+fn notifications_count<F>(notifications: &CapturedNotifications, mut predicate: F) -> usize
+where
+    F: FnMut(&CapturedNotification) -> bool,
+{
+    notifications
+        .lock()
+        .expect("notification lock should not be poisoned")
+        .iter()
+        .filter(|event| predicate(event))
+        .count()
+}
+
+async fn notifications_absent_for<F>(
+    duration: Duration,
+    notifications: &CapturedNotifications,
+    mut predicate: F,
+) -> bool
+where
+    F: FnMut(&CapturedNotification) -> bool,
+{
+    let deadline = Instant::now() + duration;
+    loop {
+        if notifications_contain(notifications, |event| predicate(event)) {
+            return false;
+        }
+        if Instant::now() >= deadline {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 async fn eventually<F>(timeout: Duration, mut condition: F) -> bool
@@ -141,22 +186,6 @@ where
         }
         if Instant::now() >= deadline {
             return false;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-}
-
-async fn remains_true_for<F>(duration: Duration, mut condition: F) -> bool
-where
-    F: FnMut() -> bool,
-{
-    let deadline = Instant::now() + duration;
-    loop {
-        if !condition() {
-            return false;
-        }
-        if Instant::now() >= deadline {
-            return true;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -189,6 +218,13 @@ fn server_result_contains_text(result: &ServerResult, expected: &str) -> bool {
         ServerResult::CallToolResult(result) => call_tool_result_contains_text(result, expected),
         _ => false,
     }
+}
+
+fn client_for_user(user: &str) -> Result<reqwest::Client> {
+    let mut default_headers = HeaderMap::new();
+    let token = token(user);
+    default_headers.insert(http::header::AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {token}"))?);
+    Ok(reqwest::Client::builder().default_headers(default_headers).build()?)
 }
 
 fn create_ports(ports: usize) -> Vec<u16> {
@@ -287,8 +323,6 @@ async fn create_gateway_with_four_counters(user: &str, config: Config) -> Result
     virtual_host_one_tool_names.sort();
     virtual_host_two_tool_names.sort();
 
-    let user_key = User::new(user);
-
     let virtual_host_one_id = uuid::Uuid::new_v4().to_string();
     let virtual_host_two_id = uuid::Uuid::new_v4().to_string();
 
@@ -299,7 +333,7 @@ async fn create_gateway_with_four_counters(user: &str, config: Config) -> Result
 
     let user_config = UserConfig { virtual_hosts };
 
-    mocked_user_config_store.set_config(&user_key, &user_config).await.expect("This should work");
+    mocked_user_config_store.set_config(&User::new(user), &user_config).await.expect("This should work");
 
     let gateway = Gateway::builder()
         .with_config(config.clone())
@@ -418,13 +452,7 @@ async fn plaintext_list_tools_end_to_end_test() -> Result<()> {
 
     let test_future: BoxFuture<'_, Result<()>> = async {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        let mut default_headers = HeaderMap::new();
-        let token = token(user);
-        default_headers.insert(
-            http::header::AUTHORIZATION,
-            HeaderValue::from_str(format!("Bearer {token}").as_str()).expect("This should work"),
-        );
-        let client = reqwest::Client::builder().default_headers(default_headers).build().expect("This should work");
+        let client = client_for_user(user)?;
 
         info!("Seding request to {gateway_url}");
 
@@ -489,24 +517,17 @@ async fn plaintext_call_tool_forwards_backend_notifications() -> Result<()> {
 
     let test_future: BoxFuture<'_, Result<()>> = async {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        let mut default_headers = HeaderMap::new();
-        let token = token(user);
-        default_headers.insert(
-            http::header::AUTHORIZATION,
-            HeaderValue::from_str(format!("Bearer {token}").as_str()).expect("This should work"),
-        );
-        let client = reqwest::Client::builder().default_headers(default_headers).build().expect("This should work");
+        let client = client_for_user(user)?;
 
         let (service, notifications) = notification_client(gateway_url.clone(), client.clone()).await?;
         let saw_initialized_tool_list = eventually(Duration::from_secs(1), || {
-            let notifications = notifications.lock().expect("notification lock should not be poisoned");
-            notifications.iter().any(|event| matches!(event, CapturedNotification::ToolListChanged))
+            notifications_contain(&notifications, |event| matches!(event, CapturedNotification::ToolListChanged))
         })
         .await;
         if !saw_initialized_tool_list {
             return Err("Expected backend tool list notification after initialize".into());
         }
-        notifications.lock().expect("notification lock should not be poisoned").clear();
+        clear_notifications(&notifications);
 
         let progress_tool = find_tool(&expected_tool_names, "-progress_task")?;
         let notification_tools = find_tools(&expected_tool_names, "-notification_task", 2)?;
@@ -531,12 +552,12 @@ async fn plaintext_call_tool_forwards_backend_notifications() -> Result<()> {
             return Err("Concurrent same-session list_tools returned partial backend data".into());
         }
 
-        let request = ClientRequest::CallToolRequest(CallToolRequest::new(CallToolRequestParams::new(progress_tool)));
+        let request =
+            ClientRequest::CallToolRequest(CallToolRequest::new(CallToolRequestParams::new(progress_tool.clone())));
         let request_handle = service.send_cancellable_request(request, PeerRequestOptions::no_options()).await?;
         let expected_progress_token = request_handle.progress_token.clone();
         let saw_progress = eventually(Duration::from_secs(1), || {
-            let notifications = notifications.lock().expect("notification lock should not be poisoned");
-            notifications.iter().any(|event| {
+            notifications_contain(&notifications, |event| {
                 matches!(
                     event,
                     CapturedNotification::Progress(params)
@@ -553,81 +574,110 @@ async fn plaintext_call_tool_forwards_backend_notifications() -> Result<()> {
 
         service.subscribe(SubscribeRequestParams::new(resource_uri.clone())).await?;
         let saw_async_resource_update = eventually(Duration::from_secs(1), || {
-            let notifications = notifications.lock().expect("notification lock should not be poisoned");
-            notifications
-                .iter()
-                .any(|event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &resource_uri))
-                && notifications.iter().any(|event| matches!(event, CapturedNotification::ResourceListChanged))
-                && notifications.iter().any(|event| matches!(event, CapturedNotification::ToolListChanged))
+            notifications_contain(
+                &notifications,
+                |event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &resource_uri),
+            ) && notifications_contain(&notifications, |event| {
+                matches!(event, CapturedNotification::ResourceListChanged)
+            }) && notifications_contain(&notifications, |event| matches!(event, CapturedNotification::ToolListChanged))
         })
         .await;
         if !saw_async_resource_update {
             return Err(format!("Expected async subscribed notifications, got {:?}", notifications.lock()).into());
         }
+        if notifications_count(&notifications, |event| matches!(event, CapturedNotification::ResourceListChanged)) != 1
+            || notifications_count(&notifications, |event| matches!(event, CapturedNotification::ToolListChanged)) != 1
+        {
+            return Err(
+                format!("Subscribe notifications should be forwarded once, got {:?}", notifications.lock()).into()
+            );
+        }
 
-        notifications.lock().expect("notification lock should not be poisoned").clear();
+        clear_notifications(&notifications);
         let result = service.call_tool(CallToolRequestParams::new(notification_tool.clone())).await?;
         let saw_resource_update = eventually(Duration::from_secs(1), || {
-            let notifications = notifications.lock().expect("notification lock should not be poisoned");
-            notifications
-                .iter()
-                .any(|event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &resource_uri))
+            notifications_contain(
+                &notifications,
+                |event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &resource_uri),
+            )
         })
         .await;
         if !saw_resource_update || !call_tool_result_contains_text(&result, "Notification task completed") {
             return Err(format!("Unexpected resource notification result {result:?} {:?}", notifications.lock()).into());
         }
 
-        notifications.lock().expect("notification lock should not be poisoned").clear();
+        clear_notifications(&notifications);
         service.subscribe(SubscribeRequestParams::new(second_resource_uri.clone())).await?;
         let saw_second_backend_resource_update = eventually(Duration::from_secs(1), || {
-            let notifications = notifications.lock().expect("notification lock should not be poisoned");
-            notifications
-                .iter()
-                .any(|event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &second_resource_uri))
+            notifications_contain(
+                &notifications,
+                |event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &second_resource_uri),
+            )
         })
         .await;
         if !saw_second_backend_resource_update {
             return Err("Expected notification from second backend subscription".into());
         }
 
-        notifications.lock().expect("notification lock should not be poisoned").clear();
+        clear_notifications(&notifications);
         service.unsubscribe(UnsubscribeRequestParams::new(resource_uri.clone())).await?;
         service.call_tool(CallToolRequestParams::new(notification_tool.clone())).await?;
-        let no_update_after_unsubscribe = remains_true_for(Duration::from_millis(100), || {
-            let notifications = notifications.lock().expect("notification lock should not be poisoned");
-            !notifications
-                .iter()
-                .any(|event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &resource_uri))
+        service.call_tool(CallToolRequestParams::new(second_notification_tool.clone())).await?;
+        let saw_unsubscribe_sentinel = eventually(Duration::from_secs(1), || {
+            notifications_contain(
+                &notifications,
+                |event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &second_resource_uri),
+            )
         })
         .await;
-        if !no_update_after_unsubscribe {
+        let saw_unsubscribed_resource = notifications_contain(
+            &notifications,
+            |event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &resource_uri),
+        );
+        let unsubscribed_resource_stayed_absent = notifications_absent_for(
+            Duration::from_millis(100),
+            &notifications,
+            |event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &resource_uri),
+        )
+        .await;
+        if !saw_unsubscribe_sentinel || saw_unsubscribed_resource || !unsubscribed_resource_stayed_absent {
             return Err("Resource update should not be forwarded after unsubscribe".into());
         }
 
         let failing_uri = format!("{backend_name}-fail://subscribe");
-        notifications.lock().expect("notification lock should not be poisoned").clear();
+        clear_notifications(&notifications);
         if service.subscribe(SubscribeRequestParams::new(failing_uri.clone())).await.is_ok() {
             return Err("Expected backend subscribe failure to propagate".into());
         }
-        let failed_subscribe_stayed_quiet = remains_true_for(Duration::from_millis(100), || {
-            let notifications = notifications.lock().expect("notification lock should not be poisoned");
-            !notifications.iter().any(
-                |event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri.starts_with(&failing_uri)),
+        service.call_tool(CallToolRequestParams::new(second_notification_tool.clone())).await?;
+        let saw_failed_subscribe_sentinel = eventually(Duration::from_secs(1), || {
+            notifications_contain(
+                &notifications,
+                |event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &second_resource_uri),
             )
         })
         .await;
-        if !failed_subscribe_stayed_quiet {
+        let saw_failed_subscribe_resource = notifications_contain(
+            &notifications,
+            |event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri.starts_with(&failing_uri)),
+        );
+        let failed_subscribe_resource_stayed_absent = notifications_absent_for(
+            Duration::from_millis(100),
+            &notifications,
+            |event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri.starts_with(&failing_uri)),
+        )
+        .await;
+        if !saw_failed_subscribe_sentinel || saw_failed_subscribe_resource || !failed_subscribe_resource_stayed_absent {
             return Err("Failed subscribe should not forward buffered resource updates".into());
         }
 
         let instant_tool = format!("{backend_name}-instant_logging_task");
         let result = service.call_tool(CallToolRequestParams::new(instant_tool)).await?;
         let saw_instant_log = eventually(Duration::from_secs(1), || {
-            let notifications = notifications.lock().expect("notification lock should not be poisoned");
-            notifications
-                .iter()
-                .any(|event| matches!(event, CapturedNotification::Logging(message) if message == "Instant log"))
+            notifications_contain(
+                &notifications,
+                |event| matches!(event, CapturedNotification::Logging(message) if message == "Instant log"),
+            )
         })
         .await;
         if !saw_instant_log || !call_tool_result_contains_text(&result, "Instant logging task completed") {
@@ -637,31 +687,51 @@ async fn plaintext_call_tool_forwards_backend_notifications() -> Result<()> {
         let (muted_service, muted_notifications) = notification_client(gateway_url.clone(), client.clone()).await?;
         muted_service.set_level(SetLevelRequestParams::new(LoggingLevel::Error)).await?;
         let (default_service, default_notifications) = notification_client(gateway_url.clone(), client.clone()).await?;
-        let (unsubscribed_service, unsubscribed_notifications) = notification_client(gateway_url, client).await?;
+        let (unsubscribed_service, unsubscribed_notifications) =
+            notification_client(gateway_url.clone(), client).await?;
         muted_service.call_tool(CallToolRequestParams::new(logging_tool.clone())).await?;
-        default_service.call_tool(CallToolRequestParams::new(logging_tool)).await?;
+        muted_service.call_tool(CallToolRequestParams::new(progress_tool.clone())).await?;
+        default_service.call_tool(CallToolRequestParams::new(logging_tool.clone())).await?;
         unsubscribed_service.call_tool(CallToolRequestParams::new(notification_tool)).await?;
-        let muted_stayed_quiet = remains_true_for(Duration::from_millis(100), || {
-            let notifications = muted_notifications.lock().expect("notification lock should not be poisoned");
-            !notifications.iter().any(|event| matches!(event, CapturedNotification::Logging(_)))
+        unsubscribed_service.call_tool(CallToolRequestParams::new(progress_tool)).await?;
+        let muted_received_progress = eventually(Duration::from_secs(1), || {
+            notifications_contain(&muted_notifications, |event| matches!(event, CapturedNotification::Progress(_)))
         })
         .await;
+        let muted_received_logs =
+            notifications_contain(&muted_notifications, |event| matches!(event, CapturedNotification::Logging(_)));
+        let muted_logs_stayed_absent =
+            notifications_absent_for(Duration::from_millis(100), &muted_notifications, |event| {
+                matches!(event, CapturedNotification::Logging(_))
+            })
+            .await;
         let default_received_logs = eventually(Duration::from_secs(1), || {
-            let notifications = default_notifications.lock().expect("notification lock should not be poisoned");
-            notifications.iter().filter(|event| matches!(event, CapturedNotification::Logging(_))).count() == 3
+            notifications_count(&default_notifications, |event| matches!(event, CapturedNotification::Logging(_))) == 3
         })
         .await;
-        if !muted_stayed_quiet || !default_received_logs {
+        if !muted_received_progress || muted_received_logs || !muted_logs_stayed_absent || !default_received_logs {
             return Err("Logging level should be scoped to the muted downstream session".into());
         }
-        let unsubscribed_received_no_resource_update = remains_true_for(Duration::from_millis(250), || {
-            let notifications = unsubscribed_notifications.lock().expect("notification lock should not be poisoned");
-            !notifications
-                .iter()
-                .any(|event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &resource_uri))
+        let unsubscribed_received_progress = eventually(Duration::from_secs(1), || {
+            notifications_contain(&unsubscribed_notifications, |event| {
+                matches!(event, CapturedNotification::Progress(_))
+            })
         })
         .await;
-        if !unsubscribed_received_no_resource_update {
+        let unsubscribed_received_resource_update = notifications_contain(
+            &unsubscribed_notifications,
+            |event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &resource_uri),
+        );
+        let unsubscribed_resource_update_stayed_absent = notifications_absent_for(
+            Duration::from_millis(100),
+            &unsubscribed_notifications,
+            |event| matches!(event, CapturedNotification::ResourceUpdated(uri) if uri == &resource_uri),
+        )
+        .await;
+        if !unsubscribed_received_progress
+            || unsubscribed_received_resource_update
+            || !unsubscribed_resource_update_stayed_absent
+        {
             return Err("Resource subscriptions should be scoped to one downstream session".into());
         }
 

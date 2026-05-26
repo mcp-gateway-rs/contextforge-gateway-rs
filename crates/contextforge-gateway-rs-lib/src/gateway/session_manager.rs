@@ -26,9 +26,7 @@ impl<'a> SessionManager<'a> {
     }
 
     pub fn get_backend_names(&self) -> Vec<&str> {
-        let mut backend_names = self.virtual_host.backends.keys().map(std::string::String::as_str).collect::<Vec<_>>();
-        backend_names.sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
-        backend_names
+        self.virtual_host.backends.keys().map(std::string::String::as_str).collect()
     }
 
     pub async fn borrow_transports(&self) -> Vec<ServiceHolder> {
@@ -52,17 +50,6 @@ impl<'a> SessionManager<'a> {
         transports
             .get(&BackendTransportKey::from((backend_name, self.session_key)))
             .map(|b| b.backend_notifications.subscribe())
-    }
-
-    pub async fn return_transports(&self, backend_transports: impl Iterator<Item = ServiceHolder>) {
-        let backend_transports = backend_transports.collect::<Vec<_>>();
-        info!("Returning transports {} {backend_transports:?}", self.session_key);
-        let mut transports = self.transports.lock().await;
-        for svc_holder in backend_transports {
-            transports
-                .entry(BackendTransportKey::from((svc_holder.name.as_str(), self.session_key)))
-                .and_modify(|e| e.service = svc_holder.running_service);
-        }
     }
 
     pub async fn cleanup_backends(&self, reason: &'static str) {

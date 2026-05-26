@@ -20,7 +20,6 @@ mod tools;
 mod user_config_store;
 pub use common::{RedisClient, RedisConfig, UpstreamConnectionMode};
 use gateway::McpService;
-use layers::session_id::SessionId;
 use tower_http::cors::{Any, CorsLayer};
 use transports::{DownstreamTls, Tcp};
 use typed_builder::TypedBuilder;

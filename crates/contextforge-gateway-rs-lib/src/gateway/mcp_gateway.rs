@@ -1,8 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use contextforge_gateway_rs_apis::user_store::UserConfig;
 use contextforge_gateway_rs_cpex::{GatewayPluginRuntimeHandle, ToolPreCallResult};
-use http::request::Parts;
 use itertools::Itertools;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
@@ -31,13 +29,10 @@ use super::{
     mcp_call_validator::{AuthorizedCallValidator, SessionKey},
 };
 pub use crate::gateway::session_store::LocalUserSessionStore;
-use crate::{
-    SessionId,
-    gateway::{
-        mcp_call_validator::InitializeCallValidator,
-        session_manager::SessionManager,
-        session_store::{UserSession, UserSessionStore},
-    },
+use crate::gateway::{
+    mcp_call_validator::InitializeCallValidator,
+    session_manager::SessionManager,
+    session_store::{UserSession, UserSessionStore},
 };
 
 #[derive(Clone, TypedBuilder)]
@@ -104,9 +99,13 @@ where
         let call_validator = InitializeCallValidator::new(&cx);
         let call_context = call_validator.validate()?;
         self.cleanup_notification_state(&call_context.session_key).await;
+        let user_session = UserSession::new(
+            call_context.principal.to_owned(),
+            Arc::clone(&call_context.downstream_session_id.session_id),
+        );
         let session_mapping = self
             .user_session_store
-            .get_session(&UserSession::new(String::new(), Arc::clone(&call_context.downstream_session_id.session_id)))
+            .get_session(&user_session)
             .await
             .map_err(|_| ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
@@ -123,17 +122,16 @@ where
                 let client = self.http_client.clone();
                 let request = request.clone();
                 let backend_url = backend.url.clone();
-                let downstream_session_id = call_context.downstream_session_id.clone();
                 let backend_notifications = broadcast::channel(64).0;
                 let backend_notification_rx = backend_notifications.subscribe();
                 let backend_notifications_for_transport = backend_notifications.clone();
 
                 Box::pin(async move {
                     let mut headers = HashMap::new();
-                    if backend_url.scheme() == "https" && let Some(host) = backend_url.host_str() {
-                        let host = backend_url
-                            .port()
-                            .map_or_else(|| host.to_owned(), |port| format!("{host}:{port}"));
+                    if backend_url.scheme() == "https"
+                        && let Some(host) = backend_url.host_str()
+                    {
+                        let host = backend_url.port().map_or_else(|| host.to_owned(), |port| format!("{host}:{port}"));
 
                         if let Ok(value) = http::HeaderValue::from_str(&host) {
                             headers.insert(http::header::HOST, value);
@@ -142,16 +140,16 @@ where
                         }
                     }
 
-                    let config = StreamableHttpClientTransportConfig::with_uri(backend_url.to_string())
-                        .custom_headers(headers);
+                    let config =
+                        StreamableHttpClientTransportConfig::with_uri(backend_url.to_string()).custom_headers(headers);
                     let transport = StreamableHttpClientTransport::with_client(client, config);
                     let backend_client = BackendClientHandler { client_info: request, backend_notifications };
                     let maybe_running_service = backend_client.serve(transport).await;
                     if let Ok(running_service) = maybe_running_service {
-                        info!("initialize: initialized for {downstream_session_id:?} {name:?}");
+                        info!("initialize: initialized backend {name:?}");
                         (name, backend_notifications_for_transport, backend_notification_rx, Some(running_service))
                     } else {
-                        warn!("initialize: Unable to initialize for {downstream_session_id:?} {name:?} {maybe_running_service:?}",);
+                        warn!("initialize: unable to initialize backend {name:?}");
                         (name, backend_notifications_for_transport, backend_notification_rx, None)
                     }
                 })
@@ -164,10 +162,7 @@ where
         let (capabilities, backend_services): (Vec<_>, Vec<_>) = initialization_results
             .into_iter()
             .map(|(name, backend_notifications, backend_notification_rx, running_service): (_, _, _, _)| {
-                info!(
-                    "initialize: Adding transport: session_id {:#?} backend {name} {running_service:?}",
-                    call_context.downstream_session_id
-                );
+                info!("initialize: adding transport for backend {name} running={}", running_service.is_some());
 
                 let server_capabilities = running_service
                     .as_ref()
@@ -177,7 +172,7 @@ where
                 }
 
                 (
-                    (name.clone(), server_capabilities.clone()),
+                    server_capabilities.clone(),
                     (
                         name.clone(),
                         BackendTransportService {
@@ -190,13 +185,7 @@ where
             })
             .unzip();
 
-        let _ = self
-            .user_session_store
-            .set_session(
-                &UserSession::new(String::new(), Arc::clone(&call_context.downstream_session_id.session_id)),
-                &session_mapping,
-            )
-            .await;
+        let _ = self.user_session_store.set_session(&user_session, &session_mapping).await;
 
         let mut transports = self.transports.lock().await;
         for (name, svc) in backend_services {
@@ -242,26 +231,15 @@ where
                 async move {
                     if let Some(service) = service_holder.running_service {
                         let response = service.list_tools(request).await;
-                        (service_holder.name, Some(service), Some(response))
+                        (service_holder.name, Some(response))
                     } else {
-                        (service_holder.name, None, None)
+                        (service_holder.name, None)
                     }
                 }
             })
             .collect::<Vec<_>>();
 
-        let list_tools_tasks_results: Vec<(String, Option<_>, Option<_>)> =
-            futures::future::join_all(list_tools_tasks).await;
-
-        let (backend_services, responses): (Vec<_>, Vec<_>) = list_tools_tasks_results
-            .into_iter()
-            .map(|(name, service, response)| {
-                info!("list_tools: backend {name} {response:?}");
-                (ServiceHolder::new(name.clone(), service), (name, response))
-            })
-            .unzip();
-
-        session_manager.return_transports(backend_services.into_iter()).await;
+        let responses = futures::future::join_all(list_tools_tasks).await;
 
         let responses = responses
             .into_iter()
@@ -308,14 +286,12 @@ where
 
         let notification_rx = session_manager.subscribe_backend_notifications(&backend_name).await;
         let backend_transports = session_manager.borrow_transports().await;
-        info!("Borrowed transports {} {backend_transports:?}", call_context.session_key);
         let downstream_peer = cx.peer.clone();
         let downstream_progress_token = cx.meta.get_progress_token();
         self.ensure_notification_relay(&session_manager, &backend_name, &call_context.session_key, cx.peer.clone())
             .await;
 
         let mut target_service = None;
-        let mut other_services = Vec::new();
         for service_holder in backend_transports {
             debug!(
                 "call_tool: Finding backend for {} {service_holder:?} {backend_name} tool_name = {tool_name}",
@@ -333,24 +309,20 @@ where
                     });
                 }
                 target_service = Some(service_holder);
-            } else {
-                other_services.push(service_holder);
             }
         }
 
-        let Some(mut target_service) = target_service else {
-            session_manager.return_transports(other_services.into_iter()).await;
+        let Some(target_service) = target_service else {
             return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
                 message: "Routing problem... got no responses from backends".into(),
                 data: None,
             });
         };
-        let Some(service) = target_service.running_service.take() else {
+        let Some(service) = target_service.running_service else {
             warn!(
                 "call_tool: trying to call a tool for which we have no backend {target_service:?} {backend_name} tool_name = {tool_name}"
             );
-            session_manager.return_transports(std::iter::once(target_service).chain(other_services)).await;
             return Err(ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
                 message: "Routing problem... got no responses from backends".into(),
@@ -376,9 +348,7 @@ where
             },
             Err(error) => Err(error),
         };
-        let service_name = target_service.name.clone();
-        target_service.running_service = Some(service);
-        session_manager.return_transports(std::iter::once(target_service).chain(other_services)).await;
+        let service_name = target_service.name;
 
         let response = response.map_err(|error| {
             warn!("call_tool: backend {service_name} {error:?}");
@@ -417,26 +387,15 @@ where
                 async move {
                     if let Some(service) = service_holder.running_service {
                         let response = service.list_resources(request).await;
-                        (service_holder.name, Some(service), Some(response))
+                        (service_holder.name, Some(response))
                     } else {
-                        (service_holder.name, None, None)
+                        (service_holder.name, None)
                     }
                 }
             })
             .collect::<Vec<_>>();
 
-        let list_tools_tasks_results: Vec<(String, Option<_>, Option<_>)> =
-            futures::future::join_all(list_resources_tasks).await;
-
-        let (backend_services, responses): (Vec<_>, Vec<_>) = list_tools_tasks_results
-            .into_iter()
-            .map(|(name, service, response)| {
-                info!("list_resources: backend {name} {response:?}");
-                (ServiceHolder::new(name.clone(), service), (name, response))
-            })
-            .unzip();
-
-        session_manager.return_transports(backend_services.into_iter()).await;
+        let responses = futures::future::join_all(list_resources_tasks).await;
 
         let responses = responses
             .into_iter()
@@ -473,39 +432,32 @@ where
         };
 
         let backend_transports = session_manager.borrow_transports().await;
-        info!("Borrowed transports {} {backend_transports:?}", call_context.session_key);
 
-        let (services, call_tool_tasks): (Vec<_>, Vec<_>) = backend_transports
+        let read_resource_tasks = backend_transports
             .into_iter()
-            .map(|service_holder| {
+            .filter_map(|service_holder| {
                 debug!(
                     "read_resource: Finding backend for {} {service_holder:?} {backend_name} read_resource = {resource_uri}",
                     &request.uri,
                 );
-                if service_holder.name == backend_name {
+                (service_holder.name == backend_name).then(|| {
                     let mut request = request.clone();
                     request.uri = String::from(resource_uri);
-                    (
-                        None,
-                        Some(async move {
-                            if let Some(service) = service_holder.running_service {
-                                let response = service.read_resource(request).await;
+                    async move {
+                        if let Some(service) = service_holder.running_service {
+                            let response = service.read_resource(request).await;
 
-                                (service_holder.name, Some(service), Some(response))
-                            } else {
-                                warn!("call_tool: trying to call a tool for which we have no backend {service_holder:?} {backend_name} resource_name = {resource_uri}");
-                                (service_holder.name, None, None)
-                            }
-                        }),
-                    )
-                } else {
-                    (Some(service_holder), None)
-                }
+                            (service_holder.name, Some(response))
+                        } else {
+                            warn!("call_tool: trying to call a tool for which we have no backend {service_holder:?} {backend_name} resource_name = {resource_uri}");
+                            (service_holder.name, None)
+                        }
+                    }
+                })
             })
-            .unzip();
+            .collect::<Vec<_>>();
 
-        let call_tool_tasks = call_tool_tasks.into_iter().flatten().collect::<Vec<_>>();
-        if call_tool_tasks.len() > 1 {
+        if read_resource_tasks.len() > 1 {
             warn!("read_resource: More than one tool matching for tool name {}", request.uri);
 
             session_manager.cleanup_backends("read_resource: invalid session.. duplicate resources detected").await;
@@ -518,18 +470,7 @@ where
             });
         }
 
-        let call_tool_tasks_results: Vec<(String, Option<_>, Option<_>)> =
-            futures::future::join_all(call_tool_tasks).await;
-
-        let (backend_services, responses): (Vec<_>, Vec<_>) = call_tool_tasks_results
-            .into_iter()
-            .map(|(name, service, response)| {
-                info!("read_resource: backend {name} {response:?}");
-                (ServiceHolder::new(name.clone(), service), (name, response))
-            })
-            .unzip();
-
-        session_manager.return_transports(backend_services.into_iter().chain(services.into_iter().flatten())).await;
+        let responses = futures::future::join_all(read_resource_tasks).await;
 
         let responses = responses
             .into_iter()
@@ -548,12 +489,9 @@ where
     async fn list_resource_templates(
         &self,
         _request: Option<PaginatedRequestParams>,
-        cx: RequestContext<RoleServer>,
+        _cx: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("list_resource_templates user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        info!("list_resource_templates");
         Ok(ListResourceTemplatesResult {
             meta: None,
             resource_templates: vec![
@@ -582,15 +520,21 @@ where
             SessionManager::new(call_context.virtual_host, &call_context.session_key, &self.transports);
         let (backend_name, resource_uri) = resource_subscription_target(&session_manager, &request.uri)?;
 
+        self.stop_notification_relay(&backend_name, &call_context.session_key).await;
         let buffered_notifications = session_manager.subscribe_backend_notifications(&backend_name).await;
 
-        forward_resource_subscription(
+        if let Err(error) = forward_resource_subscription(
             &session_manager,
             &backend_name,
             &resource_uri,
             ResourceSubscriptionAction::Subscribe,
         )
-        .await?;
+        .await
+        {
+            self.ensure_notification_relay(&session_manager, &backend_name, &call_context.session_key, cx.peer.clone())
+                .await;
+            return Err(error);
+        }
 
         self.subscriptions
             .lock()
@@ -641,12 +585,9 @@ where
     async fn list_prompts(
         &self,
         _request: Option<PaginatedRequestParams>,
-        cx: RequestContext<RoleServer>,
+        _cx: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("list_prompts user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        info!("list_prompts");
 
         Ok(ListPromptsResult {
             meta: None,
@@ -674,12 +615,9 @@ where
     async fn get_prompt(
         &self,
         request: GetPromptRequestParams,
-        cx: RequestContext<RoleServer>,
+        _cx: RequestContext<RoleServer>,
     ) -> Result<GetPromptResult, ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("get_prompt user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        info!("get_prompt");
         match request.name.as_str() {
             "test_simple_prompt" => Ok(GetPromptResult::new(vec![PromptMessage::new_text(
                 PromptMessageRole::User,
@@ -728,12 +666,9 @@ where
     async fn complete(
         &self,
         request: CompleteRequestParams,
-        cx: RequestContext<RoleServer>,
+        _cx: RequestContext<RoleServer>,
     ) -> Result<CompleteResult, ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("complete user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        info!("complete");
         let values = match &request.r#ref {
             Reference::Resource(_) => {
                 if request.argument.name == "id" {
@@ -837,6 +772,13 @@ where
         false
     }
 
+    async fn stop_notification_relay(&self, backend_name: &str, session_key: &SessionKey) {
+        let key = BackendTransportKey::from((backend_name, session_key));
+        if let Some(handle) = self.notification_relays.lock().await.remove(&key) {
+            handle.abort();
+        }
+    }
+
     async fn prune_finished_notification_relays(&self) {
         let mut relays = self.notification_relays.lock().await;
         relays.retain(|_, handle| !handle.is_finished());
@@ -883,7 +825,7 @@ fn resource_subscription_target(
     resource_uri: &str,
 ) -> Result<(String, String), ErrorData> {
     let backend_names = session_manager.get_backend_names();
-    let Some(BackendResourcePair { backend_name, resource_uri }) = split_resource_name(&resource_uri, &backend_names)
+    let Some(BackendResourcePair { backend_name, resource_uri }) = split_resource_name(resource_uri, &backend_names)
     else {
         return Err(ErrorData {
             code: ErrorCode::INTERNAL_ERROR,
@@ -920,28 +862,21 @@ async fn forward_resource_subscription(
     action: ResourceSubscriptionAction,
 ) -> Result<(), ErrorData> {
     let backend_transports = session_manager.borrow_transports().await;
-    let mut returned_services = Vec::with_capacity(backend_transports.len());
     let mut response = None;
     for service_holder in backend_transports {
-        if service_holder.name == backend_name {
-            if let Some(service) = service_holder.running_service {
-                response = Some(match action {
-                    ResourceSubscriptionAction::Subscribe => {
-                        service.subscribe(SubscribeRequestParams::new(resource_uri.to_owned())).await
-                    },
-                    ResourceSubscriptionAction::Unsubscribe => {
-                        service.unsubscribe(UnsubscribeRequestParams::new(resource_uri.to_owned())).await
-                    },
-                });
-                returned_services.push(ServiceHolder::new(service_holder.name, Some(service)));
-            } else {
-                returned_services.push(service_holder);
-            }
-        } else {
-            returned_services.push(service_holder);
+        if service_holder.name == backend_name
+            && let Some(service) = service_holder.running_service
+        {
+            response = Some(match action {
+                ResourceSubscriptionAction::Subscribe => {
+                    service.subscribe(SubscribeRequestParams::new(resource_uri.to_owned())).await
+                },
+                ResourceSubscriptionAction::Unsubscribe => {
+                    service.unsubscribe(UnsubscribeRequestParams::new(resource_uri.to_owned())).await
+                },
+            });
         }
     }
-    session_manager.return_transports(returned_services.into_iter()).await;
 
     let Some(response) = response else {
         return Err(ErrorData {
@@ -958,29 +893,16 @@ async fn forward_resource_subscription(
     Ok(())
 }
 
-fn split_tool_name<'a, T: AsRef<str>, N: AsRef<str>>(
-    tool_name: &'a T,
-    backend_names: &'a [N],
-) -> Option<BackendToolPair<'a>> {
-    let tool_name = tool_name.as_ref();
-    let mut match_pair = None;
-    for name in backend_names {
-        let name = name.as_ref();
-        if let Some(tool_name) = tool_name.strip_prefix(name).and_then(|tool_name| tool_name.strip_prefix('-')) {
-            let pair = BackendToolPair { backend_name: name, tool_name };
-            if match_pair.as_ref().is_none_or(|current: &BackendToolPair<'_>| name.len() > current.backend_name.len()) {
-                match_pair = Some(pair);
-            }
-        }
-    }
-    match_pair
+fn split_tool_name<'a, N: AsRef<str>>(tool_name: &'a str, backend_names: &'a [N]) -> Option<BackendToolPair<'a>> {
+    split_prefixed_backend_name(tool_name, backend_names)
+        .map(|(backend_name, tool_name)| BackendToolPair { backend_name, tool_name })
 }
 
 const TEST_IMAGE_DATA: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
 // Small base64-encoded WAV (silence)
 
-fn merge_capabilities(server_capabilities: &[(String, Option<ServerCapabilities>)]) -> ServerCapabilities {
+fn merge_capabilities(server_capabilities: &[Option<ServerCapabilities>]) -> ServerCapabilities {
     let mut capabilities =
         ServerCapabilities::builder().enable_prompts().enable_resources().enable_tools().enable_logging().build();
 
@@ -1004,10 +926,10 @@ fn merge_capabilities(server_capabilities: &[(String, Option<ServerCapabilities>
 }
 
 fn backend_capability(
-    server_capabilities: &[(String, Option<ServerCapabilities>)],
+    server_capabilities: &[Option<ServerCapabilities>],
     supports: impl Fn(&ServerCapabilities) -> Option<bool>,
 ) -> bool {
-    server_capabilities.iter().any(|(_, capabilities)| capabilities.as_ref().and_then(&supports).unwrap_or(false))
+    server_capabilities.iter().any(|capabilities| capabilities.as_ref().and_then(&supports).unwrap_or(false))
 }
 
 fn merge_tools(tools: Vec<(String, ListToolsResult)>) -> Vec<Tool> {
@@ -1037,25 +959,28 @@ fn merge_resources(resources: Vec<(String, ListResourcesResult)>) -> Vec<Resourc
         .collect::<Vec<_>>()
 }
 
-fn split_resource_name<'a, T: AsRef<str>, N: AsRef<str>>(
-    resource_uri: &'a T,
+fn split_resource_name<'a, N: AsRef<str>>(
+    resource_uri: &'a str,
     backend_names: &'a [N],
 ) -> Option<BackendResourcePair<'a>> {
-    let resource_uri = resource_uri.as_ref();
-    let mut match_pair = None;
-    for name in backend_names {
-        let name = name.as_ref();
-        if let Some(resource_uri) = resource_uri.strip_prefix(name).and_then(|uri| uri.strip_prefix('-')) {
-            let pair = BackendResourcePair { backend_name: name, resource_uri };
-            if match_pair
-                .as_ref()
-                .is_none_or(|current: &BackendResourcePair<'_>| name.len() > current.backend_name.len())
-            {
-                match_pair = Some(pair);
-            }
-        }
-    }
-    match_pair
+    split_prefixed_backend_name(resource_uri, backend_names)
+        .map(|(backend_name, resource_uri)| BackendResourcePair { backend_name, resource_uri })
+}
+
+fn split_prefixed_backend_name<'a, N: AsRef<str>>(
+    value: &'a str,
+    backend_names: &'a [N],
+) -> Option<(&'a str, &'a str)> {
+    backend_names
+        .iter()
+        .filter_map(|backend_name| {
+            let backend_name = backend_name.as_ref();
+            value
+                .strip_prefix(backend_name)
+                .and_then(|suffix| suffix.strip_prefix('-'))
+                .map(|suffix| (backend_name, suffix))
+        })
+        .max_by_key(|(backend_name, _)| backend_name.len())
 }
 
 #[cfg(test)]
@@ -1070,28 +995,28 @@ mod tests {
         let tool_name = "counter-one-increment";
         let backend_names = vec!["counter-on", "counter-oneee", "counter-one"];
         let pair = BackendToolPair { backend_name: "counter-one", tool_name: "increment" };
-        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
+        assert_eq!(Some(pair), split_tool_name(tool_name, &backend_names));
         let tool_name = "counter-oneincrement";
-        assert_eq!(None, split_tool_name(&tool_name, &backend_names));
+        assert_eq!(None, split_tool_name(tool_name, &backend_names));
         let tool_name = "counteroneincrement";
-        assert_eq!(None, split_tool_name(&tool_name, &backend_names));
+        assert_eq!(None, split_tool_name(tool_name, &backend_names));
         let tool_name = "counter-one-get-value";
         let pair = BackendToolPair { backend_name: "counter-one", tool_name: "get-value" };
-        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
+        assert_eq!(Some(pair), split_tool_name(tool_name, &backend_names));
 
         let backend_names = vec!["counter_on", "counter_oneee", "counter_one"];
         let tool_name = "counter_one-get-value";
         let pair = BackendToolPair { backend_name: "counter_one", tool_name: "get-value" };
-        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
+        assert_eq!(Some(pair), split_tool_name(tool_name, &backend_names));
 
         let backend_names = vec!["a", "a-b"];
         let tool_name = "a-b-get-value";
         let pair = BackendToolPair { backend_name: "a-b", tool_name: "get-value" };
-        assert_eq!(Some(pair), split_tool_name(&tool_name, &backend_names));
+        assert_eq!(Some(pair), split_tool_name(tool_name, &backend_names));
 
         let resource_uri = "a-b-memo://insights";
         let pair = BackendResourcePair { backend_name: "a-b", resource_uri: "memo://insights" };
-        assert_eq!(Some(pair), split_resource_name(&resource_uri, &backend_names));
+        assert_eq!(Some(pair), split_resource_name(resource_uri, &backend_names));
     }
 
     #[test]
@@ -1105,7 +1030,7 @@ mod tests {
             .enable_tools()
             .enable_tool_list_changed()
             .build();
-        let capabilities = merge_capabilities(&[("backend".to_owned(), Some(backend_capabilities))]);
+        let capabilities = merge_capabilities(&[Some(backend_capabilities)]);
 
         assert_eq!(capabilities.prompts.as_ref().and_then(|c| c.list_changed), None);
         assert_eq!(capabilities.resources.as_ref().and_then(|c| c.subscribe), Some(true));

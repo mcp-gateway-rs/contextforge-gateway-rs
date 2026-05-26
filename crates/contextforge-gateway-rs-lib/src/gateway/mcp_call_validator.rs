@@ -17,12 +17,20 @@ use crate::{
 /// downstream MCP session. Backend transports and notification state also need
 /// to be scoped by authenticated subject and virtual host so two callers cannot
 /// collide when they reuse the same downstream session id.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SessionKey(String);
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SessionKey {
+    subject: String,
+    virtual_host_id: String,
+    session_id: String,
+}
 
 impl SessionKey {
     pub(crate) fn new(subject: &str, virtual_host_id: &str, session_id: &str) -> Self {
-        Self(format!("{subject}\0{virtual_host_id}\0{session_id}"))
+        Self {
+            subject: subject.to_owned(),
+            virtual_host_id: virtual_host_id.to_owned(),
+            session_id: session_id.to_owned(),
+        }
     }
 }
 
@@ -32,26 +40,9 @@ impl std::fmt::Display for SessionKey {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::SessionKey;
-
-    #[test]
-    fn session_key_scopes_subject_virtual_host_and_session() {
-        let key = SessionKey::new("subject", "virtual-host", "session");
-
-        assert_ne!(key, SessionKey::new("other-subject", "virtual-host", "session"));
-        assert_ne!(key, SessionKey::new("subject", "other-virtual-host", "session"));
-        assert_ne!(key, SessionKey::new("subject", "virtual-host", "other-session"));
-    }
-
-    #[test]
-    fn session_key_display_redacts_components() {
-        let key = SessionKey::new("subject", "virtual-host", "session");
-
-        assert_eq!(key.to_string(), "[redacted-key]");
-        assert!(!key.to_string().contains("subject"));
-        assert!(!key.to_string().contains("session"));
+impl std::fmt::Debug for SessionKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SessionKey([redacted])")
     }
 }
 
@@ -63,6 +54,7 @@ pub struct AuthorizedCallContext<'a> {
 pub struct InitializeCallContext<'a> {
     pub virtual_host: &'a VirtualHost,
     pub downstream_session_id: &'a DownstreamSessionId,
+    pub principal: &'a str,
     pub session_key: SessionKey,
 }
 
@@ -82,10 +74,7 @@ impl<'a> AuthorizedCallValidator<'a> {
         let maybe_claims = maybe_parts.and_then(|parts| parts.extensions.get::<ContextForgeClaims>());
 
         let maybe_virtual_host_id = maybe_parts.and_then(|parts| parts.extensions.get::<VirtualHostId>());
-        info!(
-            "{} user_config = {maybe_user_config:#?} session_id = {maybe_session_id:#?} virtual_host_id = {maybe_virtual_host_id:#?}",
-            self.call_name
-        );
+        info!("{} request context loaded", self.call_name);
 
         let Some(session_id) = maybe_session_id else {
             return Err(ErrorData {
@@ -149,9 +138,7 @@ impl<'a> InitializeCallValidator<'a> {
         let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
         let maybe_virtual_host_id = maybe_parts.and_then(|parts| parts.extensions.get::<VirtualHostId>());
         let maybe_claims = maybe_parts.and_then(|parts| parts.extensions.get::<ContextForgeClaims>());
-        info!(
-            "initialize user_config = {maybe_user_config:#?} downstream_session_id = {maybe_downstream_session:#?} virtual_host_id = {maybe_virtual_host_id:#?}"
-        );
+        info!("initialize request context loaded");
 
         let Some(downstream_session_id) = maybe_downstream_session else {
             return Err(ErrorData {
@@ -196,7 +183,34 @@ impl<'a> InitializeCallValidator<'a> {
         Ok(InitializeCallContext {
             virtual_host,
             downstream_session_id,
+            principal: &claims.sub,
             session_key: SessionKey::new(&claims.sub, virtual_host_id.value(), downstream_session_id.value()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SessionKey;
+
+    #[test]
+    fn session_key_scopes_subject_virtual_host_and_session() {
+        let key = SessionKey::new("subject", "virtual-host", "session");
+
+        assert_ne!(key, SessionKey::new("other-subject", "virtual-host", "session"));
+        assert_ne!(key, SessionKey::new("subject", "other-virtual-host", "session"));
+        assert_ne!(key, SessionKey::new("subject", "virtual-host", "other-session"));
+    }
+
+    #[test]
+    fn session_key_display_redacts_components() {
+        let key = SessionKey::new("subject", "virtual-host", "session");
+
+        assert_eq!(key.to_string(), "[redacted-key]");
+        assert!(!key.to_string().contains("subject"));
+        assert!(!key.to_string().contains("session"));
+        assert_eq!(format!("{key:?}"), "SessionKey([redacted])");
+        assert!(!format!("{key:?}").contains("subject"));
+        assert!(!format!("{key:?}").contains("session"));
     }
 }
