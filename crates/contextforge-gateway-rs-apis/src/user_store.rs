@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
-pub enum RequestType {
+pub enum Transport {
     #[default]
     #[serde(rename = "STREAMABLEHTTP")]
     StreamableHttp,
@@ -18,57 +18,28 @@ pub enum RequestType {
 pub enum IntegrationType {
     #[serde(rename = "REST")]
     Rest,
-
     #[default]
     #[serde(rename = "MCP")]
     Mcp,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct BackendMCPGateway {
     pub name: String,
-    #[serde(default)]
-    pub original_name: String,
-    #[serde(default)]
-    pub computed_name: String,
-    #[serde(default)]
-    pub description: String,
     pub url: url::Url,
-    #[serde(default)]
-    pub plugin_chain_post: String,
-    #[serde(default)]
-    pub plugin_chain_pre: String,
-    #[serde(default)]
-    pub request_type: RequestType,
-    #[serde(default)]
-    pub integration_type: IntegrationType,
-    #[serde(default)]
-    pub expose_passthrough: bool,
-    #[serde(default)]
-    pub header_mapping: String,
-    #[serde(default)]
-    pub headers: String,
-    #[serde(default)]
-    pub reachable: String,
-    #[serde(default)]
-    pub enabled: String,
-    #[serde(default)]
-    pub visibility: String,
-    #[serde(default)]
-    pub team_id: String,
-    #[serde(default)]
-    pub gateway_id: String,
-}
+    pub transport: Transport,
+    pub passthrough_headers: Option<Vec<String>>,
+    pub allowed_tool_names: Vec<String>,
+    pub allowed_resource_names: Vec<String>,
+    pub allowed_prompt_names: Vec<String>,
+}   
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct VirtualHost {
     pub backends: HashMap<String, BackendMCPGateway>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct UserConfig {
     pub virtual_hosts: HashMap<String, VirtualHost>,
 }
