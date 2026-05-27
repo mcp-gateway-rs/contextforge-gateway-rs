@@ -13,9 +13,8 @@ use rmcp::{
         AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo,
         ErrorCode, GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
         ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, LoggingLevel,
-        PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole,
-        RawImageContent, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference, Resource,
-        ServerCapabilities, SetLevelRequestParams, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
+        PaginatedRequestParams, Prompt, RawResourceTemplate, ReadResourceRequestParams, ReadResourceResult, Reference,
+        Resource, ServerCapabilities, SetLevelRequestParams, SubscribeRequestParams, Tool, UnsubscribeRequestParams,
     },
     service::{RequestContext, RunningService},
     transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig},
@@ -542,35 +541,45 @@ where
 
     async fn list_prompts(
         &self,
-        _request: Option<PaginatedRequestParams>,
+        request: Option<PaginatedRequestParams>,
         cx: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("list_prompts user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
+        let mcp_call_validator = AuthorizedCallValidator::new("list_prompts", &cx);
+        let (virtual_host, session_id) = mcp_call_validator.validate()?;
 
-        Ok(ListPromptsResult {
-            meta: None,
-            prompts: vec![
-                Prompt::new("test_simple_prompt", Some("A simple test prompt with no arguments"), None),
-                Prompt::new(
-                    "test_prompt_with_arguments",
-                    Some("A test prompt that accepts arguments"),
-                    Some(vec![
-                        PromptArgument::new("name").with_description("The name to greet").with_required(true),
-                        PromptArgument::new("style").with_description("The greeting style").with_required(false),
-                    ]),
-                ),
-                Prompt::new(
-                    "test_prompt_with_embedded_resource",
-                    Some("A test prompt that includes an embedded resource"),
-                    None,
-                ),
-                Prompt::new("test_prompt_with_image", Some("A test prompt that includes an image"), None),
-            ],
-            next_cursor: None,
-        })
+        let session_manager = SessionManager::new(virtual_host, session_id, &self.transports);
+        let backend_transports: Vec<_> = session_manager.borrow_transports().await;
+
+        let list_prompts_tasks = backend_transports
+            .into_iter()
+            .map(|service_holder| {
+                let request = request.clone();
+                async move {
+                    if let Some(service) = service_holder.running_service {
+                        let response = service.list_prompts(request).await;
+                        (service_holder.name, Some(response))
+                    } else {
+                        (service_holder.name, None)
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let list_prompts_tasks_results: Vec<(String, Option<_>)> =
+            futures::future::join_all(list_prompts_tasks).await;
+
+        let responses = list_prompts_tasks_results
+            .into_iter()
+            .map(|(name, response)| {
+                info!("list_prompts: backend {name} {response:?}");
+                (name, response)
+            })
+            .filter_map(
+                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
+            )
+            .collect::<Vec<_>>();
+
+        Ok(ListPromptsResult { meta: None, prompts: merge_prompts(responses), next_cursor: None })
     }
 
     async fn get_prompt(
@@ -578,53 +587,79 @@ where
         request: GetPromptRequestParams,
         cx: RequestContext<RoleServer>,
     ) -> Result<GetPromptResult, ErrorData> {
-        let maybe_parts = cx.extensions.get::<Parts>();
-        let maybe_session = maybe_parts.and_then(|parts| parts.extensions.get::<SessionId>());
-        let maybe_user_config = maybe_parts.and_then(|parts| parts.extensions.get::<UserConfig>());
-        info!("get_prompt user_config = {maybe_user_config:#?} session_id = {maybe_session:#?}");
-        match request.name.as_str() {
-            "test_simple_prompt" => Ok(GetPromptResult::new(vec![PromptMessage::new_text(
-                PromptMessageRole::User,
-                "This is a simple test prompt.",
-            )])
-            .with_description("A simple test prompt")),
-            "test_prompt_with_arguments" => {
-                let args = request.arguments.unwrap_or_default();
-                let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("World");
-                let style = args.get("style").and_then(|v| v.as_str()).unwrap_or("friendly");
-                Ok(GetPromptResult::new(vec![PromptMessage::new_text(
-                    PromptMessageRole::User,
-                    format!("Please greet {name} in a {style} style."),
-                )])
-                .with_description("A prompt with arguments"))
-            },
-            "test_prompt_with_embedded_resource" => Ok(GetPromptResult::new(vec![
-                PromptMessage::new_text(PromptMessageRole::User, "Here is a resource:"),
-                PromptMessage::new_resource(
-                    PromptMessageRole::User,
-                    "test://static-text".into(),
-                    Some("text/plain".into()),
-                    Some("Resource content for prompt".into()),
-                    None,
-                    None,
-                    None,
-                ),
-            ])
-            .with_description("A prompt with an embedded resource")),
-            "test_prompt_with_image" => {
-                let image_content =
-                    RawImageContent { data: TEST_IMAGE_DATA.into(), mime_type: "image/png".into(), meta: None };
-                Ok(GetPromptResult::new(vec![
-                    PromptMessage::new_text(PromptMessageRole::User, "Here is an image:"),
-                    PromptMessage::new(
-                        PromptMessageRole::User,
-                        PromptMessageContent::Image { image: image_content.no_annotation() },
-                    ),
-                ])
-                .with_description("A prompt with an image"))
-            },
-            _ => Err(ErrorData::invalid_params(format!("Unknown prompt: {}", request.name), None)),
+        let mcp_call_validator = AuthorizedCallValidator::new("get_prompt", &cx);
+        let (virtual_host, session_id) = mcp_call_validator.validate()?;
+        let session_manager = SessionManager::new(virtual_host, session_id, &self.transports);
+
+        let backend_names = session_manager.get_backend_names();
+
+        let Some(BackendPromptPair { backend_name, prompt_name }) =
+            split_prompt_name(&request.name, &backend_names)
+        else {
+            return Err(ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Routing problem... wrong prompt name".into(),
+                data: None,
+            });
+        };
+
+        let backend_transports = session_manager.borrow_transports().await;
+        info!("Borrowed transports {session_id:?} {backend_transports:?}");
+
+        let get_prompt_tasks: Vec<_> = backend_transports
+            .into_iter()
+            .map(|service_holder| {
+                debug!(
+                    "get_prompt: Finding backend for {} {service_holder:?} {backend_name} prompt = {prompt_name}",
+                    &request.name,
+                );
+                (service_holder.name == backend_name).then(|| {
+                    let mut request = request.clone();
+                    request.name = prompt_name.to_owned();
+                    async move {
+                        if let Some(service) = service_holder.running_service {
+                            let response = service.get_prompt(request).await;
+                            (service_holder.name, Some(response))
+                        } else {
+                            warn!(
+                                "get_prompt: no backend for {service_holder:?} {backend_name} prompt = {prompt_name}"
+                            );
+                            (service_holder.name, None)
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        let get_prompt_tasks = get_prompt_tasks.into_iter().flatten().collect::<Vec<_>>();
+        if get_prompt_tasks.len() > 1 {
+            warn!("get_prompt: More than one prompt matching for prompt name {}", request.name);
+            session_manager.cleanup_backends("get_prompt: invalid session.. duplicate prompts detected").await;
+            return Err(ErrorData {
+                code: ErrorCode::INVALID_REQUEST,
+                message: "Routing problem... multiple matching prompts".into(),
+                data: None,
+            });
         }
+
+        let get_prompt_tasks_results: Vec<_> = futures::future::join_all(get_prompt_tasks).await;
+
+        let responses = get_prompt_tasks_results
+            .into_iter()
+            .map(|(name, response)| {
+                info!("get_prompt: backend {name} {response:?}");
+                (name, response)
+            })
+            .filter_map(
+                |(name, response)| if let Some(Ok(response)) = response { Some((name, response)) } else { None },
+            )
+            .collect::<Vec<_>>();
+
+        responses.first().cloned().map(|(_, r)| r).ok_or(ErrorData {
+            code: ErrorCode::INTERNAL_ERROR,
+            message: "Routing problem... got no responses from backends".into(),
+            data: None,
+        })
     }
 
     async fn complete(
@@ -680,6 +715,12 @@ struct BackendResourcePair<'a> {
     resource_uri: &'a str,
 }
 
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq)]
+struct BackendPromptPair<'a> {
+    backend_name: &'a str,
+    prompt_name: &'a str,
+}
+
 fn split_tool_name<'a, T: AsRef<str>, N: AsRef<str>>(
     tool_name: &'a T,
     backend_names: &'a [N],
@@ -694,10 +735,6 @@ fn split_tool_name<'a, T: AsRef<str>, N: AsRef<str>>(
     }
     None
 }
-
-const TEST_IMAGE_DATA: &str =
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
-// Small base64-encoded WAV (silence)
 
 fn merge_capabilities(_server_capabilities: Vec<(String, Option<ServerCapabilities>)>) -> ServerCapabilities {
     ServerCapabilities::builder().enable_prompts().enable_resources().enable_tools().enable_logging().build()
@@ -754,6 +791,41 @@ fn split_resource_name<'a, T: AsRef<str>, N: AsRef<str>>(
         }
     }
     None
+}
+
+fn split_prompt_name<'a, T: AsRef<str>, N: AsRef<str>>(
+    prompt_name: &'a T,
+    backend_names: &'a [N],
+) -> Option<BackendPromptPair<'a>> {
+    for name in backend_names {
+        let prompt_name = prompt_name.as_ref();
+        let name = name.as_ref();
+        let extended_name = name.to_owned() + "-";
+        if prompt_name.starts_with(&extended_name) {
+            return Some(BackendPromptPair {
+                backend_name: name,
+                prompt_name: &prompt_name[extended_name.len()..],
+            });
+        }
+    }
+    None
+}
+
+fn merge_prompts(prompts: Vec<(String, ListPromptsResult)>) -> Vec<Prompt> {
+    prompts
+        .into_iter()
+        .flat_map(|(backend_name, result)| {
+            result
+                .prompts
+                .into_iter()
+                .map(|mut p| {
+                    p.name = format!("{backend_name}-{}", p.name);
+                    p
+                })
+                .collect::<Vec<_>>()
+        })
+        .sorted_by(|a, b| a.name.cmp(&b.name))
+        .collect::<Vec<_>>()
 }
 
 #[cfg(test)]

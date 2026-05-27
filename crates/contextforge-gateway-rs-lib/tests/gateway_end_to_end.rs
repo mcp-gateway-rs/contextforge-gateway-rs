@@ -10,7 +10,7 @@ use futures::{FutureExt, future::BoxFuture};
 use http::{HeaderMap, HeaderValue};
 use rmcp::{
     ServiceExt,
-    model::InitializeRequestParams,
+    model::{GetPromptRequestParams, InitializeRequestParams},
     transport::{
         StreamableHttpClientTransport, StreamableHttpServerConfig, StreamableHttpService,
         streamable_http_client::StreamableHttpClientTransportConfig,
@@ -27,6 +27,8 @@ use support::{MemoryUserConfigStore, mock_counter, token};
 
 const MOCK_COUNTER_TOOL_NAMES: &[&str] =
     &["decrement", "echo", "get_session_id", "get_value", "increment", "long_task", "say_hello", "sum"];
+
+const MOCK_COUNTER_PROMPT_NAMES: &[&str] = &["counter_analysis", "example_prompt"];
 
 fn create_ports(ports: usize) -> Vec<u16> {
     (0..ports).map(|_| openport::pick_random_unused_port().expect("Expecting to find port")).collect()
@@ -52,6 +54,15 @@ fn create_tool_names(ports: &[u16]) -> Vec<String> {
         .iter()
         .flat_map(|port| {
             MOCK_COUNTER_TOOL_NAMES.iter().map(|name| format!("backend-{port}-{name}")).collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>()
+}
+
+fn create_prompt_names(ports: &[u16]) -> Vec<String> {
+    ports
+        .iter()
+        .flat_map(|port| {
+            MOCK_COUNTER_PROMPT_NAMES.iter().map(|name| format!("backend-{port}-{name}")).collect::<Vec<_>>()
         })
         .collect::<Vec<_>>()
 }
@@ -100,6 +111,7 @@ struct TestSettings {
     handle: tokio::task::JoinHandle<Vec<Result<()>>>,
     gateway_url: String,
     expected_tool_names: Vec<String>,
+    expected_prompt_names: Vec<String>,
 }
 
 async fn create_gateway_with_four_counters(user: &str, config: Config) -> Result<TestSettings> {
@@ -125,6 +137,9 @@ async fn create_gateway_with_four_counters(user: &str, config: Config) -> Result
     let mut virtual_host_two_tool_names = create_tool_names(&gateway_two_ports);
     virtual_host_one_tool_names.sort();
     virtual_host_two_tool_names.sort();
+
+    let mut virtual_host_one_prompt_names = create_prompt_names(&gateway_one_ports);
+    virtual_host_one_prompt_names.sort();
 
     let user_key = User::new(user);
 
@@ -163,7 +178,12 @@ async fn create_gateway_with_four_counters(user: &str, config: Config) -> Result
             vec![gateway].into_iter().chain(servers_one).chain(servers_two), //.chain(vec![test_future].into_iter()),
         ));
 
-        Ok(TestSettings { handle, gateway_url, expected_tool_names: virtual_host_one_tool_names })
+        Ok(TestSettings {
+            handle,
+            gateway_url,
+            expected_tool_names: virtual_host_one_tool_names,
+            expected_prompt_names: virtual_host_one_prompt_names,
+        })
     } else {
         Err("Invalid configuration".into())
     }
@@ -192,6 +212,9 @@ async fn create_tls_gateway_with_four_tls_counters(user: &str, config: Config) -
     let mut virtual_host_two_tool_names = create_tool_names(&gateway_two_ports);
     virtual_host_one_tool_names.sort();
     virtual_host_two_tool_names.sort();
+
+    let mut virtual_host_one_prompt_names = create_prompt_names(&gateway_one_ports);
+    virtual_host_one_prompt_names.sort();
 
     let user_key = User::new(user);
 
@@ -229,7 +252,12 @@ async fn create_tls_gateway_with_four_tls_counters(user: &str, config: Config) -
         let handle: tokio::task::JoinHandle<Vec<Result<()>>> =
             tokio::spawn(futures::future::join_all(vec![gateway].into_iter().chain(servers_one).chain(servers_two)));
 
-        Ok(TestSettings { handle, gateway_url, expected_tool_names: virtual_host_one_tool_names })
+        Ok(TestSettings {
+            handle,
+            gateway_url,
+            expected_tool_names: virtual_host_one_tool_names,
+            expected_prompt_names: virtual_host_one_prompt_names,
+        })
     } else {
         Err("Invalid configuration".into())
     }
@@ -249,7 +277,7 @@ async fn plaintext_list_tools_end_to_end_test() -> Result<()> {
 
     let user = "admin@example.com";
 
-    let Ok(TestSettings { handle, gateway_url, expected_tool_names }) =
+    let Ok(TestSettings { handle, gateway_url, expected_tool_names, .. }) =
         create_gateway_with_four_counters(user, config).await
     else {
         panic!("Invalid configuration ");
@@ -312,6 +340,166 @@ async fn plaintext_list_tools_end_to_end_test() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[test_log::test]
+async fn plaintext_list_prompts_end_to_end_test() -> Result<()> {
+    let gateway_port = create_ports(1)[0];
+
+    let config = Config {
+        address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
+        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
+        upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
+        ..Default::default()
+    };
+
+    let user = "admin@example.com";
+
+    let Ok(TestSettings { handle, gateway_url, expected_prompt_names, .. }) =
+        create_gateway_with_four_counters(user, config).await
+    else {
+        panic!("Invalid configuration ");
+    };
+
+    let test_future: BoxFuture<'_, Result<()>> = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut default_headers = HeaderMap::new();
+        let token = token(user);
+        default_headers.insert(
+            http::header::AUTHORIZATION,
+            HeaderValue::from_str(format!("Bearer {token}").as_str()).expect("This should work"),
+        );
+        let client = reqwest::Client::builder().default_headers(default_headers).build().expect("This should work");
+
+        info!("Sending request to {gateway_url}");
+
+        let config = StreamableHttpClientTransportConfig::with_uri(gateway_url);
+        let transport = StreamableHttpClientTransport::with_client(client, config);
+        let request = InitializeRequestParams::default();
+
+        let maybe_service = request.serve(transport).await;
+        let Ok(running_service) = maybe_service else {
+            warn!("No Service {maybe_service:?}");
+            return Err("Couldn't get a service".into());
+        };
+
+        let list_prompts = running_service.list_prompts(None).await;
+        let Ok(list_prompts) = list_prompts else {
+            let msg = format!("List prompts returned error  {list_prompts:?}");
+            warn!(msg);
+            return Err(msg.into());
+        };
+
+        let mut names: Vec<String> = list_prompts.prompts.iter().map(|p| p.name.clone()).collect();
+        names.sort();
+
+        info!("Prompt names {names:#?}");
+        if expected_prompt_names != names {
+            warn!("Actual {names:#?} Expected {expected_prompt_names:#?}");
+            return Err("Expected prompt names don't match actual".into());
+        }
+
+        Ok(())
+    }
+    .boxed();
+
+    let maybe_passed = test_future.await;
+
+    handle.abort();
+    if maybe_passed.is_ok() {
+        info!("Test passed");
+    } else {
+        info!("Test NOT passed {maybe_passed:?}");
+        panic!()
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[test_log::test]
+async fn plaintext_get_prompt_end_to_end_test() -> Result<()> {
+    let gateway_port = create_ports(1)[0];
+
+    let config = Config {
+        address: Some(format!("127.0.0.1:{gateway_port}").parse().expect("This should work")),
+        token_verification_public_key: Some("../../assets/jwt.key.pub".into()),
+        upstream_connection_mode: Some(UpstreamConnectionMode::PlainTextOrTls),
+        ..Default::default()
+    };
+
+    let user = "admin@example.com";
+
+    let Ok(TestSettings { handle, gateway_url, expected_prompt_names, .. }) =
+        create_gateway_with_four_counters(user, config).await
+    else {
+        panic!("Invalid configuration ");
+    };
+
+    let test_future: BoxFuture<'_, Result<()>> = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut default_headers = HeaderMap::new();
+        let token = token(user);
+        default_headers.insert(
+            http::header::AUTHORIZATION,
+            HeaderValue::from_str(format!("Bearer {token}").as_str()).expect("This should work"),
+        );
+        let client = reqwest::Client::builder().default_headers(default_headers).build().expect("This should work");
+
+        info!("Sending request to {gateway_url}");
+
+        let config = StreamableHttpClientTransportConfig::with_uri(gateway_url);
+        let transport = StreamableHttpClientTransport::with_client(client, config);
+        let request = InitializeRequestParams::default();
+
+        let maybe_service = request.serve(transport).await;
+        let Ok(running_service) = maybe_service else {
+            warn!("No Service {maybe_service:?}");
+            return Err("Couldn't get a service".into());
+        };
+
+        // Pick the first backend-prefixed example_prompt name (sorted, so counter_analysis comes first)
+        let prompt_name = expected_prompt_names
+            .iter()
+            .find(|n| n.ends_with("-example_prompt"))
+            .cloned()
+            .ok_or("No example_prompt in expected names")?;
+
+        info!("Calling get_prompt for {prompt_name}");
+
+        let get_prompt_request: GetPromptRequestParams = serde_json::from_value(serde_json::json!({
+            "name": prompt_name,
+            "arguments": { "message": "hello from test" }
+        }))
+        .expect("valid GetPromptRequestParams");
+        let get_prompt = running_service.get_prompt(get_prompt_request).await;
+        let Ok(result) = get_prompt else {
+            let msg = format!("get_prompt returned error for {prompt_name}: {get_prompt:?}");
+            warn!(msg);
+            return Err(msg.into());
+        };
+
+        info!("get_prompt result {result:?}");
+        if result.messages.is_empty() {
+            return Err("get_prompt returned empty messages".into());
+        }
+
+        Ok(())
+    }
+    .boxed();
+
+    let maybe_passed = test_future.await;
+
+    handle.abort();
+    if maybe_passed.is_ok() {
+        info!("Test passed");
+    } else {
+        info!("Test NOT passed {maybe_passed:?}");
+        panic!()
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[test_log::test]
 async fn tls_list_tools_end_to_end_test() -> Result<()> {
     let provider = crypto::ring::default_provider();
     _ = provider.install_default();
@@ -331,7 +519,7 @@ async fn tls_list_tools_end_to_end_test() -> Result<()> {
 
     let user = "admin@example.com";
 
-    let Ok(TestSettings { handle, gateway_url, expected_tool_names }) =
+    let Ok(TestSettings { handle, gateway_url, expected_tool_names, .. }) =
         create_tls_gateway_with_four_tls_counters(user, config).await
     else {
         panic!("Invalid configuration ");
