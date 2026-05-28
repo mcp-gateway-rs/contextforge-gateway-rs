@@ -1,7 +1,7 @@
 #![allow(clippy::pedantic)]
 #![allow(dead_code)]
 
-use std::{any::Any, sync::Arc};
+use std::{any::Any, sync::Arc, time::Duration};
 
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
@@ -18,6 +18,8 @@ use rmcp::{
 };
 use serde_json::json;
 use tokio::sync::Mutex;
+
+const SLOW_CONTROL_NOTIFICATION_DELAY: Duration = Duration::from_millis(500);
 
 struct ToolCallOperationResult {
     id: String,
@@ -105,6 +107,32 @@ impl Counter {
         Ok(CallToolResult::success(vec![Content::text("Long task completed")]))
     }
 
+    #[tool(description = "Long running task that reports cancellation")]
+    async fn cancellable_task(&self, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, McpError> {
+        let progress_token = ctx.meta.get_progress_token();
+        ctx.ct.cancelled().await;
+        if let Some(progress_token) = progress_token {
+            ctx.peer
+                .notify_progress(ProgressNotificationParam {
+                    progress_token,
+                    progress: 1.0,
+                    total: Some(1.0),
+                    message: Some("cancelled progress from backend".to_owned()),
+                })
+                .await
+                .map_err(|e| McpError::internal_error(format!("Failed to notify progress: {e}"), None))?;
+        }
+        ctx.peer
+            .notify_logging_message(LoggingMessageNotificationParam {
+                level: LoggingLevel::Info,
+                logger: Some("mock-counter".to_owned()),
+                data: json!("Cancellable task cancelled"),
+            })
+            .await
+            .map_err(|e| McpError::internal_error(format!("Failed to notify logging: {e}"), None))?;
+        Ok(CallToolResult::success(vec![Content::text("Cancellable task cancelled")]))
+    }
+
     #[tool(description = "Long running task with progress updates")]
     async fn progress_task(&self, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, McpError> {
         if let Some(progress_token) = ctx.meta.get_progress_token() {
@@ -136,19 +164,6 @@ impl Counter {
         }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         Ok(CallToolResult::success(vec![Content::text("Logging task completed")]))
-    }
-
-    #[tool(description = "Task with an immediate logging update")]
-    async fn instant_logging_task(&self, ctx: RequestContext<RoleServer>) -> Result<CallToolResult, McpError> {
-        ctx.peer
-            .notify_logging_message(LoggingMessageNotificationParam {
-                level: LoggingLevel::Info,
-                logger: Some("mock-counter".to_owned()),
-                data: json!("Instant log"),
-            })
-            .await
-            .map_err(|e| McpError::internal_error(format!("Failed to notify logging: {e}"), None))?;
-        Ok(CallToolResult::success(vec![Content::text("Instant logging task completed")]))
     }
 
     #[tool(description = "Task with list and resource notifications")]
@@ -251,6 +266,7 @@ impl ServerHandler for Counter {
                 .enable_resources_list_changed()
                 .enable_tools()
                 .enable_tool_list_changed()
+                .enable_logging()
                 .build(),
         )
         .with_server_info(Implementation::from_build_env())
@@ -301,6 +317,14 @@ impl ServerHandler for Counter {
         }
     }
 
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, McpError> {
+        Ok(ListResourceTemplatesResult { next_cursor: None, resource_templates: Vec::new(), meta: None })
+    }
+
     async fn subscribe(
         &self,
         request: SubscribeRequestParams,
@@ -312,6 +336,10 @@ impl ServerHandler for Counter {
                 .notify_resource_updated(ResourceUpdatedNotificationParam::new("fail://subscribe/private"))
                 .await;
             return Err(McpError::internal_error("subscribe failed for test", None));
+        }
+        if request.uri == "slow://subscribe" {
+            tokio::time::sleep(SLOW_CONTROL_NOTIFICATION_DELAY).await;
+            return Ok(());
         }
         if request.uri == "memo://insights" {
             let _ = ctx.peer.notify_resource_updated(ResourceUpdatedNotificationParam::new("memo://insights")).await;
@@ -333,18 +361,25 @@ impl ServerHandler for Counter {
                 .await;
             return Err(McpError::internal_error("unsubscribe failed for test", None));
         }
+        if request.uri == "slow://unsubscribe" {
+            tokio::time::sleep(SLOW_CONTROL_NOTIFICATION_DELAY).await;
+            return Ok(());
+        }
         if request.uri == "memo://insights" {
             let _ = ctx.peer.notify_resource_updated(ResourceUpdatedNotificationParam::new("memo://insights")).await;
         }
         Ok(())
     }
 
-    async fn list_resource_templates(
+    async fn set_level(
         &self,
-        _request: Option<PaginatedRequestParams>,
-        _: RequestContext<RoleServer>,
-    ) -> Result<ListResourceTemplatesResult, McpError> {
-        Ok(ListResourceTemplatesResult { next_cursor: None, resource_templates: Vec::new(), meta: None })
+        request: SetLevelRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), McpError> {
+        if request.level == LoggingLevel::Debug {
+            tokio::time::sleep(SLOW_CONTROL_NOTIFICATION_DELAY).await;
+        }
+        Ok(())
     }
 
     async fn initialize(

@@ -1,4 +1,4 @@
-use std::{fs, sync::Arc};
+use std::{collections::HashMap, fs, sync::Arc};
 
 use axum::middleware;
 use contextforge_gateway_rs_cpex::GatewayPluginRuntimeHandle;
@@ -8,6 +8,7 @@ use rmcp::transport::{
     StreamableHttpServerConfig,
     streamable_http_server::{session::local::LocalSessionManager, tower::StreamableHttpService},
 };
+use tokio::sync::Mutex;
 mod common;
 mod const_values;
 mod gateway;
@@ -19,7 +20,7 @@ mod tools;
 
 mod user_config_store;
 pub use common::{RedisClient, RedisConfig, UpstreamConnectionMode};
-use gateway::McpService;
+use gateway::{McpService, SessionCleanupRegistry, UserSessionStore as GatewayUserSessionStore};
 use tower_http::cors::{Any, CorsLayer};
 use transports::{DownstreamTls, Tcp};
 use typed_builder::TypedBuilder;
@@ -35,7 +36,9 @@ use crate::{
     common::{ContextForgeGatewayAppState, JwtTokenDecoders},
     gateway::LocalUserSessionStore,
     layers::{
-        claims_id::claims_layer, session_id::SessionIdLayer, user_config_store::user_config_store_layer,
+        claims_id::claims_layer,
+        session_id::{SessionIdLayer, SessionOwnerState, session_owner_layer},
+        user_config_store::user_config_store_layer,
         virtual_host_id::virtual_host_id_layer,
     },
 };
@@ -54,6 +57,8 @@ pub struct Gateway {
     user_config_store_type: UserConfigStoreType,
     #[builder(default)]
     plugin_runtime: Option<GatewayPluginRuntimeHandle>,
+    #[builder(default)]
+    upstream_notification_control_timeout: Option<std::time::Duration>,
 }
 
 impl Gateway {
@@ -67,6 +72,11 @@ impl Gateway {
         let user_config_store = user_config_store as Arc<dyn UserConfigStore + Send + Sync>;
 
         let user_session_store = LocalUserSessionStore::new();
+        let session_cleanup_registry: SessionCleanupRegistry = Arc::new(Mutex::new(HashMap::new()));
+        let session_owner_state = SessionOwnerState {
+            user_session_store: Arc::new(user_session_store.clone()) as Arc<dyn GatewayUserSessionStore>,
+            cleanup_registry: Arc::clone(&session_cleanup_registry),
+        };
         let mcp_plugin_runtime = self.plugin_runtime;
 
         let streamable_config = StreamableHttpServerConfig::default().disable_allowed_hosts();
@@ -80,6 +90,10 @@ impl Gateway {
                     Ok(McpService::builder()
                         .with_user_session_store(user_session_store.clone())
                         .with_http_client(reqwest_backend_client.clone())
+                        .with_session_cleanup_registry(Arc::clone(&session_cleanup_registry))
+                        .with_upstream_notification_control_timeout(
+                            self.upstream_notification_control_timeout.unwrap_or(std::time::Duration::from_secs(5)),
+                        )
                         .with_plugin_runtime(mcp_plugin_runtime.clone())
                         .build())
                 },
@@ -118,6 +132,7 @@ impl Gateway {
         let app = axum::Router::new()
             .nest_service("/servers/{virtual_host_name}/mcp", mcp_service)
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), user_config_store_layer))
+            .layer(middleware::from_fn_with_state(session_owner_state, session_owner_layer))
             .layer(middleware::from_fn_with_state(mcp_add_state.clone(), claims_layer))
             .layer(SessionIdLayer)
             .layer(middleware::from_fn(virtual_host_id_layer))

@@ -24,6 +24,10 @@ impl LocalUserSessionStore {
 
 #[async_trait]
 impl UserSessionStore for LocalUserSessionStore {
+    async fn has_session<'a>(&self, session_key: &'a UserSession) -> Result<bool, SessionStoreError> {
+        Ok(self.cache.lock().await.get_mut(session_key).is_some())
+    }
+
     async fn get_session<'a>(&self, session_key: &'a UserSession) -> Result<Option<SessionMapping>, SessionStoreError> {
         if let Some(user_session) = self.cache.lock().await.get_mut(session_key) {
             Ok(Some(user_session.clone()))
@@ -38,6 +42,11 @@ impl UserSessionStore for LocalUserSessionStore {
         mapping: &'a SessionMapping,
     ) -> Result<(), SessionStoreError> {
         self.cache.lock().await.insert(session_key.clone(), mapping.clone());
+        Ok(())
+    }
+
+    async fn remove_session<'a>(&self, session_key: &'a UserSession) -> Result<(), SessionStoreError> {
+        self.cache.lock().await.remove(session_key);
         Ok(())
     }
 }

@@ -20,7 +20,7 @@ pub async fn user_config_store_layer(
         debug!("Getting user config for {subject:?}");
         match state.config_store.get_config(&User::new(&subject)).await {
             Ok(user_config) => {
-                info!("Got config for user {subject}");
+                info!("Got config for user {subject} {user_config:?}");
                 request.extensions_mut().insert(user_config);
                 next.run(request).await
             },

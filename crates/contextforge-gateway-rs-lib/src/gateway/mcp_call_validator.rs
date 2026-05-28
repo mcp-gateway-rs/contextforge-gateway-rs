@@ -1,14 +1,18 @@
 use contextforge_gateway_rs_apis::user_store::{UserConfig, VirtualHost};
+use std::sync::Arc;
+
 use http::request::Parts;
-//use rmcp::{ErrorData, RoleServer, model::ErrorCode, service::RequestContext, transport::DownstreamSessionId};
 use rmcp::{
-    ErrorData, RoleServer, model::ErrorCode, service::RequestContext,
+    ErrorData, RoleServer,
+    model::{ErrorCode, Extensions},
+    service::RequestContext,
     transport::streamable_http_server::tower::DownstreamSessionId,
 };
 use tracing::info;
 
 use crate::{
     common::ContextForgeClaims,
+    gateway::UserSession,
     layers::{session_id::SessionId, virtual_host_id::VirtualHostId},
 };
 
@@ -33,6 +37,20 @@ impl SessionKey {
             session_id: session_id.to_owned(),
         }
     }
+
+    pub(crate) fn from_authorized_extensions(extensions: &Extensions) -> Option<Self> {
+        let parts = extensions.get::<Parts>()?;
+        let session_id = parts.extensions.get::<SessionId>()?;
+        let user_config = parts.extensions.get::<UserConfig>()?;
+        let virtual_host_id = parts.extensions.get::<VirtualHostId>()?;
+        let claims = parts.extensions.get::<ContextForgeClaims>()?;
+        user_config.virtual_hosts.get(virtual_host_id.value())?;
+        Some(Self::new(&claims.sub, virtual_host_id.value(), session_id.value()))
+    }
+
+    pub(crate) fn to_user_session(&self) -> UserSession {
+        UserSession::new(self.subject.clone(), self.virtual_host_id.clone(), Arc::from(self.session_id.as_str()))
+    }
 }
 
 impl std::fmt::Display for SessionKey {
@@ -54,6 +72,7 @@ pub struct AuthorizedCallContext<'a> {
 
 pub struct InitializeCallContext<'a> {
     pub virtual_host: &'a VirtualHost,
+    pub virtual_host_id: &'a str,
     pub downstream_session_id: &'a DownstreamSessionId,
     pub principal: &'a str,
     pub session_key: SessionKey,
@@ -194,6 +213,7 @@ impl<'a> InitializeCallValidator<'a> {
 
         Ok(InitializeCallContext {
             virtual_host,
+            virtual_host_id: virtual_host_id.value(),
             downstream_session_id,
             principal: &claims.sub,
             session_key: SessionKey::new(&claims.sub, virtual_host_id.value(), downstream_session_id.value()),

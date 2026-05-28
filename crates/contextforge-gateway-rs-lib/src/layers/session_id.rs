@@ -1,7 +1,15 @@
 use std::task::{Context, Poll};
 
-use crate::const_values::MCP_SESSION_ID;
-use axum::http::Request;
+use std::sync::Arc;
+
+use crate::{
+    common::ContextForgeClaims,
+    const_values::MCP_SESSION_ID,
+    gateway::{SessionCleanupRegistry, UserSession, UserSessionStore, cleanup_registered_session_or_owner},
+    layers::virtual_host_id::VirtualHostId,
+};
+use axum::{body::Body, extract::State, http::Request, middleware::Next, response::Response};
+use http::{Method, StatusCode, header};
 use tower::Service;
 use tower_layer::Layer;
 
@@ -53,4 +61,66 @@ where
 
         self.service.call(request)
     }
+}
+
+#[derive(Clone)]
+pub struct SessionOwnerState {
+    pub user_session_store: Arc<dyn UserSessionStore>,
+    pub cleanup_registry: SessionCleanupRegistry,
+}
+
+pub async fn session_owner_layer(
+    State(state): State<SessionOwnerState>,
+    request: http::Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let Some(session_id) = request.extensions().get::<SessionId>() else {
+        return next.run(request).await;
+    };
+    let Some(claims) = request.extensions().get::<ContextForgeClaims>() else {
+        return not_found_response();
+    };
+    let Some(virtual_host_id) = request.extensions().get::<VirtualHostId>() else {
+        return not_found_response();
+    };
+
+    let session =
+        UserSession::new(claims.sub.clone(), virtual_host_id.value().clone(), Arc::from(session_id.value().as_str()));
+    match state.user_session_store.has_session(&session).await {
+        Ok(true) => {
+            let remove_owner = request.method() == Method::DELETE;
+            let response = next.run(request).await;
+            if remove_owner
+                && response.status().is_success()
+                && cleanup_registered_session_or_owner(
+                    &state.cleanup_registry,
+                    state.user_session_store.as_ref(),
+                    &session,
+                )
+                .await
+                .is_err()
+            {
+                return Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .header(header::CONTENT_TYPE, "text/plain")
+                    .body(Body::empty())
+                    .expect("response should build");
+            }
+            response
+        },
+        Ok(false) => not_found_response(),
+        Err(_) => Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .header(header::CONTENT_TYPE, "text/plain")
+            .body(Body::empty())
+            .expect("response should build"),
+    }
+}
+
+fn not_found_response() -> Response {
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .header(header::CONTENT_TYPE, "text/plain")
+        .body(Body::empty())
+        .expect("response should build")
 }

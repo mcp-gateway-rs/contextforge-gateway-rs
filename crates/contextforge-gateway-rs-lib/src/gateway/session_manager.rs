@@ -41,17 +41,6 @@ impl<'a> SessionManager<'a> {
             .collect()
     }
 
-    // pub async fn return_transports(&self, backend_transports: impl Iterator<Item = ServiceHolder>) {
-    //     let backend_transports = backend_transports.collect::<Vec<_>>();
-    //     info!("Returning transports {:?} {backend_transports:?}", self.session_id);
-    //     let mut transports = self.transports.lock().await;
-    //     for svc_holder in backend_transports {
-    //         transports
-    //             .entry(BackendTransportKey::from((&svc_holder.name, self.session_id)))
-    //             .and_modify(|e| e.service = svc_holder.running_service);
-    //     }
-    // }
-
     pub(crate) async fn subscribe_backend_notifications(
         &self,
         backend_name: &str,
