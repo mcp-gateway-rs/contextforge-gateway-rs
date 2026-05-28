@@ -6,7 +6,7 @@ use std::{
 
 use contextforge_gateway_rs_apis::{
     User,
-    user_store::{BackendMCPGateway, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, Transport, UserConfig, VirtualHost},
 };
 use contextforge_gateway_rs_cpex::CpexRuntimeRegistry;
 use contextforge_gateway_rs_lib::{Config, Gateway, UpstreamConnectionMode, UserConfigStore, UserConfigStoreType};
@@ -185,6 +185,12 @@ async fn start_gateway_with_runtime(
                             backend_name.clone(),
                             BackendMCPGateway {
                                 url: format!("http://127.0.0.1:{backend_port}/mcp").parse().expect("backend URL"),
+                                name: String::new(),
+                                transport: Transport::default(),
+                                passthrough_headers: Vec::new(),
+                                allowed_tool_names: Vec::new(),
+                                allowed_resource_names: Vec::new(),
+                                allowed_prompt_names: Vec::new(),
                             },
                         )]),
                     },

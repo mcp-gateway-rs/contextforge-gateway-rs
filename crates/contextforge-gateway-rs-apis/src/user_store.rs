@@ -28,7 +28,7 @@ pub struct BackendMCPGateway {
     pub name: String,
     pub url: url::Url,
     pub transport: Transport,
-    pub passthrough_headers: Option<Vec<String>>,
+    pub passthrough_headers: Vec<String>,
     pub allowed_tool_names: Vec<String>,
     pub allowed_resource_names: Vec<String>,
     pub allowed_prompt_names: Vec<String>,

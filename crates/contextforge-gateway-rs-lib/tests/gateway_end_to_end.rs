@@ -4,7 +4,7 @@ use std::{collections::HashMap, fs::File, io::Read, net::SocketAddr, sync::Arc, 
 
 use contextforge_gateway_rs_apis::{
     User,
-    user_store::{BackendMCPGateway, IntegrationType, RequestType, UserConfig, VirtualHost},
+    user_store::{BackendMCPGateway, Transport, UserConfig, VirtualHost},
 };
 use futures::{FutureExt, future::BoxFuture};
 use http::{HeaderMap, HeaderValue};
@@ -46,22 +46,12 @@ fn create_backends(ports: &[u16], with_tls: bool) -> HashMap<String, BackendMCPG
                 format!("backend-{port}"),
                 BackendMCPGateway {
                     name: format!("backend-{port}"),
-                    original_name: String::new(),
-                    computed_name: String::new(),
-                    description: String::new(),
                     url,
-                    plugin_chain_post: String::new(),
-                    plugin_chain_pre: String::new(),
-                    request_type: RequestType::default(),
-                    integration_type: IntegrationType::default(),
-                    expose_passthrough: false,
-                    header_mapping: String::new(),
-                    headers: String::new(),
-                    reachable: String::new(),
-                    enabled: String::new(),
-                    visibility: String::new(),
-                    team_id: String::new(),
-                    gateway_id: String::new(),
+                    transport: Transport::default(),
+                    passthrough_headers: Vec::new(),
+                    allowed_tool_names: Vec::new(),
+                    allowed_resource_names: Vec::new(),
+                    allowed_prompt_names: Vec::new(),
                 },
             )
         })
